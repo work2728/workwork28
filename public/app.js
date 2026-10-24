@@ -39,7 +39,7 @@
     if (v.need === 'fre' && role() !== 'fre') return go(home());
     if (v.need === 'cli' && role() !== 'cli') return go(home());
     if (v.guest && U()) return go(home());
-    if (needsSetup() && name !== 'setup' && name !== 'terms') { if (S.view === 'setup' && $('#f-profile')) { toast('Finish your profile first.'); history.replaceState(null, '', '#/setup'); return; } return go('setup'); }
+    if (needsSetup() && name !== 'setup' && name !== 'terms' && name !== 'privacy') { if (S.view === 'setup' && $('#f-profile')) { toast('Finish your profile first.'); history.replaceState(null, '', '#/setup'); return; } return go('setup'); }
     if (name === 'setup' && U() && !needsSetup()) return go('edit-profile');
     var y = window.scrollY, changed = S.view !== name || S.arg !== arg;
     S.view = name; S.arg = arg; S.qs = h.qs;
@@ -343,7 +343,7 @@
         field('jn-phone', 'Phone number', '<input id="jn-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0803 123 4567">') +
         field('jn-email', 'Email', '<input id="jn-email" type="email" autocomplete="email" placeholder="you@example.com">') +
         field('jn-password', 'Password', '<input id="jn-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">') +
-        '<label class="check"><input type="checkbox" id="jn-terms"><span>I agree to the <a class="link-btn" href="#/terms" target="_blank">PadiHire terms</a> and will keep all payments on PadiHire.</span></label><p class="err" id="jn-terms-err" hidden></p>' +
+        '<label class="check"><input type="checkbox" id="jn-terms"><span>I agree to the <a class="link-btn" href="#/terms" target="_blank">terms</a> and <a class="link-btn" href="#/privacy" target="_blank">privacy policy</a>, and will keep all payments on PadiHire.</span></label><p class="err" id="jn-terms-err" hidden></p>' +
         '<button type="submit" class="btn btn-primary full">Create my account</button></form></div>';
     }
   };
@@ -609,7 +609,7 @@
         (cliR ? mitem('plus', 'Post a job', '', 'href="#/post"') : mitem('eye', 'View public profile', '', 'href="#/freelancer/' + u.id + '"') + mitem('heart', 'Saved jobs', '', 'href="#/work" data-saved="1"')) +
         mitem('bank', 'Bank account', u.bank.acct ? esc(u.bank.name) + ' •••• ' + esc(u.bank.acct.slice(-4)) : 'Not added yet', 'data-act="bank"') +
         mitem(cliR ? 'laptop' : 'briefcase', cliR ? 'Switch to freelancing' : 'Switch to hiring', cliR ? 'Find work with the same account' : 'Post jobs with the same account', 'data-act="switch" data-v="' + (cliR ? 'fre' : 'cli') + '"') +
-        mitem('help', 'How payment works', '', 'data-act="help"') + mitem('doc', 'Terms and rules', '', 'href="#/terms"') +
+        mitem('help', 'How payment works', '', 'data-act="help"') + mitem('doc', 'Terms and rules', '', 'href="#/terms"') + mitem('shield', 'Privacy policy', 'How we use and protect your data', 'href="#/privacy"') +
         (S.me.support_whatsapp ? mitem('whatsapp', 'Contact support', 'WhatsApp', 'href="https://wa.me/' + esc(waNum(S.me.support_whatsapp)) + '" target="_blank" rel="noopener"') : '') +
         (S.me.is_admin ? mitem('gear', 'Admin panel', 'Top-ups, withdrawals, disputes', 'href="/admin"') : '') +
         mitem('logout', 'Log out', '', 'data-act="signout"') + '</ul></div>';
@@ -653,6 +653,24 @@
     }
   };
 
+  V.privacy = {
+    title: function () { return 'Privacy policy'; },
+    html: function () {
+      function sec(t, items) { return '<section class="d-block"><h2 class="sub">' + t + '</h2><ul class="terms">' + items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></section>'; }
+      var wa = S.me.support_whatsapp;
+      return '<div class="wrap scr col">' + backBtn() + '<h1 class="pg-title">Privacy policy</h1><p class="pg-sub">How PadiHire collects, uses and protects your personal data. Last updated 24 October 2026.</p>' +
+        sec('What we collect', ['Account details: your name, email address, phone number, city, and whether you hire or freelance.', 'Profile details you add: headline, category, skills, bio, starting price, business name and CV.', 'Your activity on PadiHire: jobs, proposals, messages, files you upload, reviews and reports.', 'Money records: wallet top-ups, payments held in escrow, fees, withdrawals, and the bank account you add for withdrawals.', 'One login cookie that keeps you signed in for up to 30 days. We don’t use advertising or tracking cookies.']) +
+        sec('How we use it', ['To run your account and show your profile, jobs and proposals to the right people.', 'To hold payments in escrow, pay freelancers, make refunds and keep accurate records.', 'To keep PadiHire safe. Messages are checked automatically for phone numbers, emails, social handles and talk of paying outside PadiHire. Those details are hidden, and the message may be flagged for our team to review.', 'To settle disputes. When a dispute is opened, our team reads the chat and files for that contract.', 'To give support and tell you about important changes to your account.']) +
+        sec('Who can see what', ['Anyone can see a freelancer’s public profile: name, headline, city, skills, bio, rating and reviews.', 'Job posts show the client’s name or business name.', 'Only signed-in users can open a freelancer’s CV.', 'Proposals and their files are seen only by the client who posted the job.', 'Messages are seen only by the two people in the chat, and by our team when a message is flagged or a dispute is opened.', 'Your phone number, email address and bank details are never shown to other users.']) +
+        sec('Who we share it with', ['We don’t sell your personal data.', 'Companies that run PadiHire for us, such as Cloudflare for hosting, the database and file storage. Pages also load fonts from Google Fonts. Some of this data may be stored on servers outside Nigeria.', 'Banks, to send withdrawals and refunds.', 'The police, courts or regulators, when the law requires it or to deal with fraud.']) +
+        sec('How long we keep it', ['We keep your data while your account is open.', 'If you close your account, we delete or anonymise your profile. We keep payment, contract and dispute records for as long as the law and our accounts require.']) +
+        sec('Keeping it safe', ['Passwords are stored scrambled (hashed), never as plain text.', 'The site uses an encrypted connection (HTTPS), and only a small team can use the admin tools.', 'If a data breach affects you, we will tell you and the regulator as the law requires.']) +
+        sec('Your rights', ['Under the Nigeria Data Protection Act 2023 you can ask to see, correct or delete your data, get a copy of it, or object to how we use it.', 'You can correct most details yourself in Edit profile. For anything else, contact support.', 'If you are not happy with our answer, you can complain to the Nigeria Data Protection Commission (NDPC).']) +
+        sec('Other', ['PadiHire is for people aged 18 and over.', 'If we change this policy, we will update it here and change the date at the top. Big changes will also be announced in the app.']) +
+        (wa ? '<p style="margin-top:24px"><a class="btn btn-ghost" href="https://wa.me/' + esc(waNum(wa)) + '" target="_blank" rel="noopener">' + ic('whatsapp') + 'Contact support</a></p>' : '') + '</div>';
+    }
+  };
+
   /* ---------- chrome ---------- */
   var NAV = {
     visitor: [['explore', 'Home', 'home'], ['jobs', 'Jobs', 'search'], ['freelancers', 'Freelancers', 'users'], ['login', 'Log in', 'user']],
@@ -665,7 +683,7 @@
     if (v === 'freelancer') return 'freelancers';
     if (v === 'myjob') return 'dash';
     if (v === 'join') return 'login';
-    if (v === 'edit-profile' || v === 'terms' || v === 'setup') return 'account';
+    if (v === 'edit-profile' || v === 'terms' || v === 'privacy' || v === 'setup') return 'account';
     return v;
   }
   function chrome() {
@@ -676,11 +694,14 @@
     $('#top').innerHTML = '<div class="wrap top-in">' + brandHtml('#/', 'PadiHire home') +
       '<nav class="nav" aria-label="Main">' + items.filter(function (it) { return it[0] !== 'login'; }).map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
       '<div class="top-right">' + right + '</div></div>';
+    footer();
     var tabs = $('#tabs'); tabs.style.setProperty('--n', items.length);
     tabs.innerHTML = items.map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + ic(it[2]) + it[1] + badge(it[0]) + '</a>'; }).join('');
   }
   function footer() {
-    $('#foot').innerHTML = '<div class="wrap foot"><p>© ' + new Date().getFullYear() + ' PadiHire · Freelance work and talent in Nigeria</p><p class="foot-links"><a class="link-btn" href="#/terms">Terms</a><button type="button" class="link-btn" data-act="help">How payment works</button></p></div>';
+    var f = $('#foot'), on = !U();
+    f.classList.toggle('foot-min', !on);
+    f.innerHTML = on ? '<div class="wrap foot"><p>© ' + new Date().getFullYear() + ' PadiHire · Freelance work and talent in Nigeria</p><p class="foot-links"><a class="link-btn" href="#/terms">Terms</a><a class="link-btn" href="#/privacy">Privacy</a><button type="button" class="link-btn" data-act="help">How payment works</button></p></div>' : '';
   }
 
   /* ---------- modals ---------- */

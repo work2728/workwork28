@@ -500,3 +500,5 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulati
 .opt{font-weight:400;color:var(--muted)}
 body[data-current="setup"] .tabs,body[data-current="setup"] .nav,body[data-current="setup"] .top-right{display:none}
 body[data-current="setup"] footer{padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+footer.foot-min{border-top:0}
+@media (min-width:901px){footer.foot-min{display:none}}
