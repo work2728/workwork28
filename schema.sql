@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS users (
   bank_acct TEXT NOT NULL DEFAULT '',
   bank_holder TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active',       -- active or suspended
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  cv_file INTEGER NOT NULL DEFAULT 0,
+  cv_name TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -182,6 +184,33 @@ CREATE TABLE IF NOT EXISTS saved (
   PRIMARY KEY (user_id, job_id)
 );
 
+CREATE TABLE IF NOT EXISTS files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  kind TEXT NOT NULL,                          -- cv, proposal, message
+  scope TEXT NOT NULL DEFAULT 'pending',       -- pending, cv, proposal, message, old
+  ref_id INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS files_ref ON files(scope, ref_id);
+CREATE INDEX IF NOT EXISTS files_user ON files(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS flags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  context TEXT NOT NULL,                       -- message, proposal, job, profile
+  ref_id INTEGER NOT NULL DEFAULT 0,
+  original TEXT NOT NULL,
+  reasons TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',         -- open, reviewed
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS flags_status ON flags(status, id);
+
 CREATE TABLE IF NOT EXISTS settings (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL
@@ -191,6 +220,7 @@ INSERT OR IGNORE INTO settings (k, v) VALUES
   ('fre_fee_pct', '10'),
   ('monthly_proposals', '20'),
   ('auto_release_days', '5'),
+  ('mask_after_hire', '1'),
   ('bank_name', ''),
   ('bank_acct', ''),
   ('bank_holder', ''),

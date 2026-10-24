@@ -1,0 +1,31 @@
+CREATE TABLE IF NOT EXISTS files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'pending',
+  ref_id INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS files_ref ON files(scope, ref_id);
+CREATE INDEX IF NOT EXISTS files_user ON files(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS flags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  context TEXT NOT NULL,
+  ref_id INTEGER NOT NULL DEFAULT 0,
+  original TEXT NOT NULL,
+  reasons TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS flags_status ON flags(status, id);
+
+ALTER TABLE users ADD COLUMN cv_file INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN cv_name TEXT NOT NULL DEFAULT '';
+
+INSERT OR IGNORE INTO settings (k, v) VALUES ('mask_after_hire', '1');
