@@ -83,6 +83,8 @@ var ICONS = {
 ICONS.eye = '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>';
 ICONS.whatsapp = '<path d="M4 20l1.3-3.9A8.2 8.2 0 1 1 8.2 19z"/><path d="M9 8.8c0 3 2.6 6 5.8 6.2l.9-1.4-1.6-.9-.8.8c-1-.4-2.4-1.8-2.8-2.8l.8-.8-.9-1.6-1.4.9"/>';
 ICONS.gear = '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M4.2 7.5l1.9 1.1M17.9 15.4l1.9 1.1M4.2 16.5l1.9-1.1M17.9 8.6l1.9-1.1"/>';
+var LOGO = '<svg class="logo-mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><g class="lm-a"><circle cx="32" cy="24" r="10"/><rect x="24" y="40" width="16" height="46" rx="8"/><rect x="32" y="56" width="22" height="12" rx="6"/></g><g class="lm-b"><circle cx="68" cy="24" r="10"/><rect x="60" y="40" width="16" height="46" rx="8"/><rect x="48" y="56" width="20" height="12" rx="6"/></g></svg>';
+function brandHtml(href, label) { return '<a class="brand" href="' + href + '"' + (label ? ' aria-label="' + label + '"' : '') + '>' + LOGO + '<span>Padi<b>Hire</b></span></a>'; }
 function ic(n, cls) { return '<svg class="ic ' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (ICONS[n] || '') + '</svg>'; }
 var AVC = [['#d7ebf2', '#0e586f'], ['#f6e1d0', '#8a3c0b'], ['#e5ddf4', '#4a2e85'], ['#dcefd8', '#245a1b'], ['#f6dce3', '#8b2140'], ['#eee6cc', '#6a5106'], ['#dbe3f2', '#21417a'], ['#d9efe9', '#11594b']];
 function face(name, cls) {

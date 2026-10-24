@@ -5,7 +5,7 @@
   var TABS = [['overview', 'Overview'], ['topups', 'Top-ups'], ['withdrawals', 'Withdrawals'], ['disputes', 'Disputes'], ['flags', 'Flags'], ['reports', 'Reports'], ['users', 'Users'], ['settings', 'Settings']];
 
   function chrome(counts) {
-    $('#top').innerHTML = '<div class="wrap top-in"><a class="brand" href="/#/">Padi<b>Hire</b></a><span class="adm-tag">Admin</span><div class="top-right"><a class="login" href="/#/">Back to site</a></div></div>';
+    $('#top').innerHTML = '<div class="wrap top-in">' + brandHtml('/#/', 'PadiHire home') + '<span class="adm-tag">Admin</span><div class="top-right"><a class="login" href="/#/">Back to site</a></div></div>';
     $('#atabs').innerHTML = '<div class="wrap"><div class="utabs" role="tablist">' + TABS.map(function (t) {
       var n = counts && counts[t[0]];
       return '<button type="button" role="tab" aria-selected="' + (A.tab === t[0]) + '" data-act="tab" data-v="' + t[0] + '">' + t[1] + (n ? ' <span class="count">' + n + '</span>' : '') + '</button>';

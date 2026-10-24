@@ -1,12 +1,12 @@
 /* PadiHire styles. Text rows split by hairlines, underline tabs, violet, Montserrat for headings and money, Open Sans for everything else. */
 :root{--bg:#ffffff;--surface:#f7f5fb;--chip:#efecf5;--ink:#1a1625;--ink-2:#3f3a4d;--muted:#625c70;--line:#e8e5ef;--line-2:#d4cfe0;
---accent:#5b21b6;--accent-hover:#4c1d95;--on-accent:#ffffff;--accent-soft:#f1eafe;--accent-ink:#5b21b6;--amber:#7c3aed;--on-amber:#ffffff;--brand-2:#7c3aed;--ok:#167a48;
+--accent:#5b21b6;--accent-hover:#4c1d95;--on-accent:#ffffff;--accent-soft:#f1eafe;--accent-ink:#5b21b6;--amber:#7c3aed;--on-amber:#ffffff;--brand-2:#7c3aed;--mark-2:#8b5cf6;--ok:#167a48;
 --dark:#1a1625;--on-dark:#ffffff;--star:#e5a312;--warn:#c23b1c;--flag:#fff7e0;--flag-line:#e8b931;--field:#ffffff;
 --display:"Montserrat",system-ui,sans-serif;--body:"Open Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#120f18;--surface:#1a1622;--chip:#251f30;--ink:#ece8f4;--ink-2:#cbc4d8;--muted:#a39bb3;--line:#2b2537;--line-2:#3b3349;
---accent:#a78bfa;--accent-hover:#c4b5fd;--on-accent:#1e0b45;--accent-soft:#2a1f45;--accent-ink:#c4b5fd;--amber:#a78bfa;--on-amber:#1e0b45;--brand-2:#c4b5fd;--ok:#4cc38a;--dark:#ece8f4;--on-dark:#120f18;--star:#f2c14e;--warn:#f08466;--flag:#2b2410;--flag-line:#8a6d14;--field:#16121e;color-scheme:dark}}
+--accent:#a78bfa;--accent-hover:#c4b5fd;--on-accent:#1e0b45;--accent-soft:#2a1f45;--accent-ink:#c4b5fd;--amber:#a78bfa;--on-amber:#1e0b45;--brand-2:#c4b5fd;--mark-2:#c4b5fd;--ok:#4cc38a;--dark:#ece8f4;--on-dark:#120f18;--star:#f2c14e;--warn:#f08466;--flag:#2b2410;--flag-line:#8a6d14;--field:#16121e;color-scheme:dark}}
 :root[data-theme="dark"]{--bg:#120f18;--surface:#1a1622;--chip:#251f30;--ink:#ece8f4;--ink-2:#cbc4d8;--muted:#a39bb3;--line:#2b2537;--line-2:#3b3349;
---accent:#a78bfa;--accent-hover:#c4b5fd;--on-accent:#1e0b45;--accent-soft:#2a1f45;--accent-ink:#c4b5fd;--amber:#a78bfa;--on-amber:#1e0b45;--brand-2:#c4b5fd;--ok:#4cc38a;--dark:#ece8f4;--on-dark:#120f18;--star:#f2c14e;--warn:#f08466;--flag:#2b2410;--flag-line:#8a6d14;--field:#16121e;color-scheme:dark}
+--accent:#a78bfa;--accent-hover:#c4b5fd;--on-accent:#1e0b45;--accent-soft:#2a1f45;--accent-ink:#c4b5fd;--amber:#a78bfa;--on-amber:#1e0b45;--brand-2:#c4b5fd;--mark-2:#c4b5fd;--ok:#4cc38a;--dark:#ece8f4;--on-dark:#120f18;--star:#f2c14e;--warn:#f08466;--flag:#2b2410;--flag-line:#8a6d14;--field:#16121e;color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;margin:0}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--bg)}
@@ -48,8 +48,10 @@ button{cursor:pointer;background:none;border:0;padding:0;text-align:inherit}
 /* Header */
 .top{position:sticky;top:env(safe-area-inset-top,0px);z-index:25;background:var(--bg);border-bottom:3px solid var(--accent)}
 .top-in{display:flex;align-items:center;gap:28px;min-height:58px}
-.brand{font-family:var(--display);font-weight:800;font-size:21px;letter-spacing:-.025em;color:var(--accent);white-space:nowrap}
-.brand b{color:var(--brand-2);font-weight:inherit}
+.brand{display:inline-flex;align-items:center;gap:7px;font-family:var(--display);font-weight:800;font-size:21px;letter-spacing:-.025em;color:var(--ink);white-space:nowrap;line-height:1}
+.brand b{color:var(--accent);font-weight:inherit}
+.logo-mark{width:30px;height:30px;flex-shrink:0}
+.lm-a{fill:var(--accent)}.lm-b{fill:var(--mark-2)}
 .nav{display:flex;align-items:stretch;align-self:stretch;gap:22px;font-size:14.5px;font-weight:600}
 .nav a{display:inline-flex;align-items:center;gap:6px;color:var(--ink-2);white-space:nowrap;border-bottom:3px solid transparent;margin-bottom:-3px}
 .nav a:hover{color:var(--accent-ink)}
@@ -492,3 +494,9 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulati
 .att-file span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 .att-file small{color:var(--muted)}
 .att-file .ic{flex:none}
+
+/* profile setup (required) */
+.step-note{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 6px}
+.opt{font-weight:400;color:var(--muted)}
+body[data-current="setup"] .tabs,body[data-current="setup"] .nav,body[data-current="setup"] .top-right{display:none}
+body[data-current="setup"] footer{padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}

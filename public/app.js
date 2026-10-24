@@ -11,6 +11,12 @@
   function blankQ() { return { q: '', cat: '', city: '', budget: '', level: '', verified: '', remote: '', today: '', sort: 'new' }; }
   function U() { return S.me.user; }
   function role() { return U() ? U().role : null; }
+  function needsSetup() {
+    var u = U(); if (!u) return false;
+    if (!u.city) return true;
+    if (u.role === 'fre') return !(u.title && u.cat && u.skills && u.skills.length && u.about && u.about.length >= 30);
+    return false;
+  }
   function home() { return !U() ? 'explore' : role() === 'cli' ? 'dash' : 'work'; }
   function locText(j) { return j.remote ? 'Remote' : (j.city || 'Nigeria'); }
   function feePct() { return (S.me.fee || {}); }
@@ -33,6 +39,8 @@
     if (v.need === 'fre' && role() !== 'fre') return go(home());
     if (v.need === 'cli' && role() !== 'cli') return go(home());
     if (v.guest && U()) return go(home());
+    if (needsSetup() && name !== 'setup' && name !== 'terms') { if (S.view === 'setup' && $('#f-profile')) { toast('Finish your profile first.'); history.replaceState(null, '', '#/setup'); return; } return go('setup'); }
+    if (name === 'setup' && U() && !needsSetup()) return go('edit-profile');
     var y = window.scrollY, changed = S.view !== name || S.arg !== arg;
     S.view = name; S.arg = arg; S.qs = h.qs;
     var seq = ++S.seq;
@@ -332,7 +340,7 @@
         field('jn-name', 'Full name', '<input id="jn-name" type="text" autocomplete="name" placeholder="e.g. Chioma Okeke">') +
         (fre ? '<div class="field-row">' + field('jn-cat', 'Type of work', '<select id="jn-cat">' + catOptions('Choose one') + '</select>') + field('jn-title', 'Your main skill', '<input id="jn-title" type="text" placeholder="e.g. Flyer and logo designer">') + '</div>'
           : field('jn-business', 'Business or brand name', '<input id="jn-business" type="text" placeholder="e.g. Chioma’s Bakery">', 'Optional. Freelancers see it on your jobs.')) +
-        '<div class="field-row">' + field('jn-phone', 'Phone number', '<input id="jn-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0803 123 4567">') + field('jn-city', 'City', '<select id="jn-city">' + cityOptions() + '</select>') + '</div>' +
+        field('jn-phone', 'Phone number', '<input id="jn-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0803 123 4567">') +
         field('jn-email', 'Email', '<input id="jn-email" type="email" autocomplete="email" placeholder="you@example.com">') +
         field('jn-password', 'Password', '<input id="jn-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">') +
         '<label class="check"><input type="checkbox" id="jn-terms"><span>I agree to the <a class="link-btn" href="#/terms" target="_blank">PadiHire terms</a> and will keep all payments on PadiHire.</span></label><p class="err" id="jn-terms-err" hidden></p>' +
@@ -354,7 +362,7 @@
     html: function (d) {
       var u = U(), score = profileScore(u), note = S.wtab === 'best' ? (u.cat ? 'Jobs in ' + CAT[u.cat].label.toLowerCase() + ', newest first' : '') : S.wtab === 'recent' ? 'Newest jobs in every category' : '';
       var s = '<div class="wrap scr with-side"><div class="mcol">' + sbar('x-search', 'Search for jobs') +
-        (score < 100 ? '<div class="pbanner"><div class="pb-top"><strong>Your profile is ' + score + '% complete</strong><span>' + score + '%</span></div><div class="bar"><span style="width:' + score + '%"></span></div><p class="small">Add your headline, a short bio, your skills, your starting price, your CV and your bank account. Complete profiles get hired more.</p><a class="btn btn-ghost btn-sm" href="#/setup">Finish profile</a></div>' : '') +
+        (score < 100 ? '<div class="pbanner"><div class="pb-top"><strong>Your profile is ' + score + '% complete</strong><span>' + score + '%</span></div><div class="bar"><span style="width:' + score + '%"></span></div><p class="small">Add your headline, a short bio, your skills, your starting price, your CV and your bank account. Complete profiles get hired more.</p><a class="btn btn-ghost btn-sm" href="#/edit-profile">Finish profile</a></div>' : '') +
         utabs('wtab', [['best', 'Best matches'], ['recent', 'Most recent'], ['saved', 'Saved']], S.wtab) + (note ? '<p class="tab-note">' + note + '</p>' : '');
       s += d.jobs.length ? rows(d.jobs) : S.wtab === 'saved' ? emptyBox('No saved jobs', 'Tap the heart on a job to save it for later.') : emptyBox('No jobs here yet', 'New jobs are posted every day. Check back soon, or look in other categories.', '<button type="button" class="btn btn-ghost" data-act="tab" data-tab="wtab" data-v="recent">See all jobs</button>');
       return s + '</div>' + freSide(d.props) + '</div>';
@@ -610,20 +618,20 @@
   function profileHtml(setup) {
       var u = U(), fre = role() === 'fre';
       S.cv = undefined;
-      return '<div class="wrap scr narrow">' + (setup ? '' : backBtn()) + '<h1 class="pg-title">' + (setup ? 'Set up your profile' : 'Edit profile') + '</h1>' +
-        (setup ? '<p class="pg-sub">Clients see this when you apply. Pick up to 3 skills and add your CV so you stand out.</p>' : fre && !u.cat ? '<p class="pg-sub">Set up your freelancer profile so you can send proposals.</p>' : '') +
+      return '<div class="wrap scr narrow">' + (setup ? '<p class="step-note">Last step</p>' : backBtn()) + '<h1 class="pg-title">' + (setup ? (fre ? 'Set up your profile' : 'Finish your profile') : 'Edit profile') + '</h1>' +
+        (setup ? '<p class="pg-sub">' + (fre ? 'Clients see this when you apply. Fill it in to start using PadiHire. Pick up to 3 skills and add your CV so you stand out.' : 'Tell freelancers where you are. This takes a few seconds.') + '</p>' : '') +
         '<form id="f-profile" class="form" novalidate data-setup="' + (setup ? 1 : 0) + '">' +
         field('pf-name', 'Full name', '<input id="pf-name" type="text" value="' + esc(u.name) + '" autocomplete="name">') +
         field('pf-city', 'City', '<select id="pf-city">' + cityOptions('Choose your city') + '</select>') +
         (fre ? field('pf-title', 'Headline', '<input id="pf-title" type="text" maxlength="80" value="' + esc(u.title) + '" placeholder="e.g. Brand and social media designer">', 'Shown under your name') +
           field('pf-cat', 'Category', '<select id="pf-cat">' + catOptions('Choose one') + '</select>') +
-          '<div class="field"><span class="flabel">Your skills (up to 3)</span>' + skillPicker('pf', 3, u.skills, u.cat) + '</div>' +
-          '<div class="field"><span class="flabel">CV</span>' + cvBlock() + '</div>' +
-          field('pf-rate', 'Jobs from (₦)', '<input id="pf-rate" type="text" inputmode="numeric" value="' + (u.rate_from ? num(u.rate_from) : '') + '" placeholder="15,000">', 'Your usual starting price') +
-          field('pf-about', 'About you', '<textarea id="pf-about" rows="5" maxlength="1200" placeholder="What you do, who you have worked for, and how fast you deliver.">' + esc(u.about) + '</textarea>')
+          '<div class="field" id="pf-skills"><span class="flabel">Your skills (up to 3)</span>' + skillPicker('pf', 3, u.skills, u.cat) + '<p class="err" id="pf-skills-err" hidden></p></div>' +
+          field('pf-about', 'About you', '<textarea id="pf-about" rows="5" maxlength="1200" placeholder="What you do, who you have worked for, and how fast you deliver.">' + esc(u.about) + '</textarea>', 'At least a sentence or two') +
+          '<div class="field"><span class="flabel">CV <span class="opt">(optional)</span></span>' + cvBlock() + '</div>' +
+          field('pf-rate', 'Jobs from (₦) <span class="opt">(optional)</span>', '<input id="pf-rate" type="text" inputmode="numeric" value="' + (u.rate_from ? num(u.rate_from) : '') + '" placeholder="15,000">', 'Your usual starting price')
           : field('pf-business', 'Business or brand name', '<input id="pf-business" type="text" value="' + esc(u.business) + '">', 'Optional')) +
-        '<button type="submit" class="btn btn-primary full">' + (setup ? 'Save and find work' : 'Save profile') + '</button></form>' +
-        (setup ? '<p class="center-line"><a class="link-btn" href="#/work">Skip for now</a></p>' :
+        '<button type="submit" class="btn btn-primary full">' + (setup ? (fre ? 'Save and find work' : 'Save and continue') : 'Save profile') + '</button></form>' +
+        (setup ? '<p class="center-line small">Not you? <button type="button" class="link-btn" data-act="signout">Log out</button></p>' :
         '<h2 class="sub" style="margin-top:34px">Change password</h2><form id="f-pass" class="form" novalidate>' +
         field('pw-current', 'Current password', '<input id="pw-current" type="password" autocomplete="current-password">') +
         field('pw-password', 'New password', '<input id="pw-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">') +
@@ -631,7 +639,7 @@
   }
   function profileAfter() { var u = U(); var c = $('#pf-city'); if (c) c.value = u.city || ''; var k = $('#pf-cat'); if (k) k.value = u.cat || ''; }
   V['edit-profile'] = { need: 'any', title: function () { return 'Edit profile'; }, html: function () { return profileHtml(false); }, after: profileAfter };
-  V.setup = { need: 'fre', title: function () { return 'Set up your profile'; }, html: function () { return profileHtml(true); }, after: profileAfter };
+  V.setup = { need: 'any', title: function () { return 'Set up your profile'; }, html: function () { return profileHtml(true); }, after: profileAfter };
   V.terms = {
     title: function () { return 'Terms and rules'; },
     html: function () {
@@ -665,7 +673,7 @@
     function badge(id) { var n = id === 'messages' ? S.me.unread : id === 'dash' ? S.me.waiting : 0; return n ? '<span class="count">' + n + '</span>' : ''; }
     var right = !u ? '<a class="login" href="#/login">Log in</a><button type="button" class="btn btn-primary btn-sm" data-act="join">Sign up</button>'
       : '<a class="me-btn" href="#/account" aria-label="Your account"' + (S.view === 'account' ? ' aria-current="page"' : '') + '>' + face(u.name) + '</a>';
-    $('#top').innerHTML = '<div class="wrap top-in"><a class="brand" href="#/" aria-label="PadiHire home">Padi<b>Hire</b></a>' +
+    $('#top').innerHTML = '<div class="wrap top-in">' + brandHtml('#/', 'PadiHire home') +
       '<nav class="nav" aria-label="Main">' + items.filter(function (it) { return it[0] !== 'login'; }).map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
       '<div class="top-right">' + right + '</div></div>';
     var tabs = $('#tabs'); tabs.style.setProperty('--n', items.length);
@@ -792,7 +800,7 @@
       case 'switch':
         api('POST', 'me/role', { role: v }).then(loadMe).then(function () {
           toast(v === 'cli' ? 'Switched to hiring' : 'Switched to freelancing');
-          if (v === 'fre' && !U().cat) go('edit-profile'); else if (S.view === 'job') router(true); else go(home());
+          if (needsSetup()) go('setup'); else if (S.view === 'job') router(true); else go(home());
         }, function (er) { toast(er.message); });
         break;
       case 'signout': api('POST', 'auth/logout').then(function () { S.me = { user: S.me.user && null, support_whatsapp: S.me.support_whatsapp }; S.wtab = 'best'; S.ctab = 'open'; go('explore'); toast('Logged out'); }); break;
@@ -878,8 +886,8 @@
       if (!$('#jn-terms').checked) { fieldErr('jn-terms', 'Tick the box to agree to the terms.'); return; }
       fieldErr('jn-terms', '');
       var fre = S.join.role === 'fre';
-      run(api('POST', 'auth/signup', { role: S.join.role, name: $('#jn-name').value, email: $('#jn-email').value, phone: $('#jn-phone').value, password: $('#jn-password').value, city: $('#jn-city').value, cat: fre ? $('#jn-cat').value : '', title: fre ? $('#jn-title').value : '', business: fre ? '' : $('#jn-business').value }),
-        function () { loadMe().then(function () { S.join = { step: 1, role: null }; var n = S.next; S.next = ''; if (fre) go('setup'); else if (n && n !== '#/login' && n !== '#/join') location.hash = n; else go(home()); toast('Welcome to PadiHire, ' + first(U().name)); }); }, 'jn-');
+      run(api('POST', 'auth/signup', { role: S.join.role, name: $('#jn-name').value, email: $('#jn-email').value, phone: $('#jn-phone').value, password: $('#jn-password').value, cat: fre ? $('#jn-cat').value : '', title: fre ? $('#jn-title').value : '', business: fre ? '' : $('#jn-business').value }),
+        function () { loadMe().then(function () { S.join = { step: 1, role: null }; var n = S.next; S.next = (n && n !== '#/login' && n !== '#/join') ? n : ''; go('setup'); toast('Welcome to PadiHire, ' + first(U().name)); }); }, 'jn-');
     } else if (id === 'f-apply') {
       if (S.att.apply.some(function (x) { return x.busy; })) { toast('Wait for your files to finish uploading.'); return; }
       run(api('POST', 'jobs/' + f.getAttribute('data-id') + '/apply', { price: parseNum($('#ap-price').value), days: parseNum($('#ap-days').value), note: $('#ap-note').value, files: S.att.apply.map(function (x) { return x.id; }) }), function (r) {
@@ -922,7 +930,7 @@
       var body = { name: $('#pf-name').value, city: $('#pf-city').value, title: fr ? $('#pf-title').value : U().title, cat: fr ? $('#pf-cat').value : U().cat, skills: fr ? S.picks.pf.list : U().skills, about: fr ? $('#pf-about').value : U().about, rate_from: fr ? parseNum($('#pf-rate').value) : U().rate_from, business: fr ? U().business : $('#pf-business').value };
       if (fr && S.cv !== undefined) body.cv_file = S.cv ? S.cv.id : 0;
       run(api('POST', 'me/profile', body),
-        function (r) { S.cv = undefined; loadMe().then(function () { toast(r.masked ? MASK_NOTE : 'Profile saved'); go(fr ? 'work' : 'account'); }); }, 'pf-');
+        function (r) { S.cv = undefined; loadMe().then(function () { var wasSetup = S.view === 'setup', n = S.next; S.next = ''; toast(r.masked ? MASK_NOTE : wasSetup ? 'You\u2019re all set' : 'Profile saved'); if (wasSetup && n && n !== '#/setup') location.hash = n; else go(wasSetup ? home() : fr ? 'work' : 'account'); }); }, 'pf-');
     } else if (id === 'f-pass') {
       run(api('POST', 'me/password', { current: $('#pw-current').value, password: $('#pw-password').value }), function () { f.reset(); toast('Password changed'); }, 'pw-');
     } else if (id === 'f-deliver' || id === 'f-changes' || id === 'f-dispute') {
