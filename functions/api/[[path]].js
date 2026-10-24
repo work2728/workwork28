@@ -278,8 +278,17 @@ on('POST', 'me/profile', async (c) => {
   if (name.split(' ').length < 2) fail(400, 'Enter your first and last name.', { fields: { name: 'Enter your first and last name.' } });
   const cat = b.cat === '' || b.cat == null ? u.cat : (CATS[b.cat] ? b.cat : u.cat);
   const title = scrub(str(b.title, 80)), about = scrub(str(b.about, 1200)), biz = scrub(str(b.business, 80));
+  const skills = cleanSkills(b.skills, 3), city = str(b.city, 40), fields = {};
+  if (!city) fields.city = 'Choose your city.';
+  if (u.role === 'fre') {
+    if (str(b.title, 80).length < 3) fields.title = 'Add a short headline, e.g. Brand designer.';
+    if (!cat) fields.cat = 'Choose your category.';
+    if (!skills.length) fields.skills = 'Pick at least one skill.';
+    if (str(b.about, 1200).length < 30) fields.about = 'Write at least a sentence or two about your work.';
+  }
+  if (Object.keys(fields).length) fail(400, 'Please fill in the highlighted fields.', { fields });
   const stmts = [c.db.prepare('UPDATE users SET name = ?, city = ?, title = ?, cat = ?, skills = ?, about = ?, rate_from = ?, business = ? WHERE id = ?')
-    .bind(name, str(b.city, 40), title.text, cat, JSON.stringify(cleanSkills(b.skills, 3)), about.text, Math.max(0, int(b.rate_from)), biz.text, u.id)];
+    .bind(name, city, title.text, cat, JSON.stringify(skills), about.text, Math.max(0, int(b.rate_from)), biz.text, u.id)];
   const hit = title.hit || about.hit || biz.hit;
   if (hit) stmts.push(flagStmt(c, 'profile', u.id, [b.title, b.about, b.business].filter(Boolean).join(' | '), Array.from(new Set(title.reasons.concat(about.reasons, biz.reasons)))));
   if ('cv_file' in b) {
@@ -370,6 +379,7 @@ on('GET', 'jobs/:id', async (c, p) => {
 });
 on('POST', 'jobs', async (c) => {
   const u = need(c), b = c.body, fields = {};
+  if (!u.city) fail(400, 'Finish setting up your profile before you post a job.');
   const rawTitle = str(b.title, 120), rawDescr = str(b.descr, 4000), cat = b.cat, budget = int(b.budget), days = Math.max(1, Math.min(365, int(b.days) || 3));
   const st = scrub(rawTitle), sd = scrub(rawDescr), title = st.text, descr = sd.text;
   const level = LEVELS.indexOf(b.level) >= 0 ? b.level : 'Intermediate';
@@ -415,6 +425,7 @@ on('GET', 'saved', async (c) => {
 on('POST', 'jobs/:id/apply', async (c, p) => {
   const u = need(c), b = c.body, s = await settings(c);
   if (!u.cat) fail(400, 'Set up your freelancer profile before you apply.');
+  if (!u.city || !u.title || !parseList(u.skills).length || (u.about || '').length < 30) fail(400, 'Finish setting up your profile before you apply.');
   const j = await c.db.prepare('SELECT * FROM jobs WHERE id = ?').bind(int(p.id)).first();
   if (!j || j.status !== 'open') fail(400, 'This job is no longer taking proposals.');
   if (j.client_id === u.id) fail(400, 'You cannot apply to your own job.');
