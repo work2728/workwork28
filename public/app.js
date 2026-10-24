@@ -17,7 +17,7 @@
     if (u.role === 'fre') return !(u.title && u.cat && u.skills && u.skills.length && u.about && u.about.length >= 30);
     return false;
   }
-  function home() { return !U() ? 'explore' : role() === 'cli' ? 'dash' : 'work'; }
+  function home() { return !U() ? 'explore' : role() === 'cli' ? 'dash' : 'home'; }
   function locText(j) { return j.remote ? 'Remote' : (j.city || 'Nigeria'); }
   function feePct() { return (S.me.fee || {}); }
 
@@ -180,18 +180,52 @@
   /* ---------- views ---------- */
   var V = {};
 
+  ICONS.lock = '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>';
+  var CAT_IC = { design: 'pen', writing: 'doc', web: 'code', video: 'video', social: 'megaphone', admin: 'table' };
+  function greet() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
+  function hello(sub, title, extra) { return '<div class="hello">' + face(U().name, 'av-md') + '<div class="hello-t"><p class="small">' + sub + '</p><h1 class="pg-title">' + title + '</h1></div>' + (extra || '') + '</div>'; }
+  function stat(href, n, label) { return '<a class="stat" href="' + href + '"><b>' + n + '</b><span>' + label + '</span></a>'; }
+  function stChip(text, cls) { return '<span class="st ' + cls + '">' + text + '</span>'; }
+  function jcard(j) {
+    var c = CAT[j.cat];
+    return '<article class="jcard"><p class="jc-meta"><span class="cat-chip">' + esc(c ? c.short : 'Other') + '</span><span>' + ago(j.created_at) + '</span></p>' +
+      '<h3 class="jc-title"><a class="jr-link" href="#/job/' + j.id + '">' + esc(j.title) + '</a></h3>' +
+      '<p class="jc-sub"><b>' + naira(j.budget) + '</b> · ' + daysText(j.days) + ' · ' + esc(locText(j)) + '</p>' +
+      '<p class="jc-foot">' + (j.client.verified ? '<span class="vt">' + ic('shield') + 'Payment verified</span>' : '') + '<span>Proposals: ' + band(j.props) + '</span>' + (j.applied ? '<span class="ok-t">' + ic('tick') + 'Applied</span>' : '') + (j.mine ? '<span class="mine-t">Your job</span>' : '') + '</p>' + jsave(j) + '</article>';
+  }
+  function cjcard(j) {
+    var href, st, sub, prog = '';
+    if (j.status === 'open') { href = '#/myjob/' + j.id; st = j.props ? stChip(j.props + (j.props === 1 ? ' proposal' : ' proposals'), 'st-new') : stChip('Open', 'st-open'); sub = 'Posted ' + ago(j.created_at) + ' · Budget ' + naira(j.budget) + (j.props ? '' : ' · Invite freelancers'); }
+    else if (!j.contract_id) { href = '#/myjob/' + j.id; st = stChip('Closed', 'st-done'); sub = 'Closed without hiring'; }
+    else {
+      href = '#/chat/' + j.thread_id;
+      var n = j.stage === 'active' ? 1 : (j.stage === 'delivered' || j.stage === 'disputed') ? 2 : 3;
+      st = j.stage === 'active' ? stChip('In progress', 'st-ok') : j.stage === 'delivered' ? stChip('Delivered', 'st-act') : j.stage === 'disputed' ? stChip('In dispute', 'st-warn') : j.stage === 'paid' ? stChip('Paid', 'st-done') : stChip('Refunded', 'st-done');
+      sub = j.stage === 'active' ? esc(j.fre_name) + ' is working on it · ' + naira(j.amount) + ' in escrow'
+        : j.stage === 'delivered' ? esc(j.fre_name) + ' delivered. Check the work and approve'
+        : j.stage === 'disputed' ? 'PadiHire is reviewing this job'
+        : j.stage === 'paid' ? 'Paid ' + naira(j.amount) + ' to ' + esc(j.fre_name) + (j.rated ? '' : ' · Leave a review') : 'Refunded to your wallet';
+      if (n < 3) prog = '<span class="prog" aria-hidden="true"><span class="on"></span><span' + (n >= 2 ? ' class="on"' : '') + '></span><span></span></span>';
+    }
+    return '<a class="jcard" href="' + href + '"><span class="jc-top"><strong class="jc-title">' + esc(j.title) + '</strong>' + st + '</span>' + prog + '<span class="jc-sub">' + sub + '</span></a>';
+  }
+  function missing(u) {
+    var m = [];
+    if (!u.cv) m.push('CV'); if (!(u.rate_from > 0)) m.push('starting price'); if (!(u.about && u.about.length >= 40)) m.push('a longer bio'); if (!(u.bank && u.bank.acct)) m.push('bank account');
+    return m.length > 1 ? m.slice(0, -1).join(', ') + ' and ' + m[m.length - 1] : m.join('');
+  }
   V.explore = {
-    load: function () { return S.xmode === 'pros' ? api('GET', 'freelancers?limit=5') : api('GET', 'jobs?limit=6'); },
+    load: function () { return api('GET', 'jobs?limit=6'); },
     html: function (d) {
-      var x = S.xmode, s = '<div class="wrap scr with-side"><div class="mcol"><h1 class="pg-title">Freelance work and talent in Nigeria</h1>' +
-        utabs('xmode', [['jobs', 'Find work'], ['pros', 'Hire a freelancer']], x) +
-        sbar('x-search', x === 'jobs' ? 'Search jobs' : 'Search freelancers') +
-        '<div class="chip-row">' + CATS.map(function (c) { return '<a href="#/' + (x === 'jobs' ? 'jobs?cat=' : 'freelancers?cat=') + c.id + '">' + esc(c.label) + '</a>'; }).join('') + '</div>';
-      if (x === 'jobs') s += secHead('Recently posted', d.jobs.length ? '<a class="see" href="#/jobs">See all jobs</a>' : '') + (d.jobs.length ? rows(d.jobs) : emptyBox('No jobs yet', 'Be the first to post a job. Posting is free, and you only pay when you hire.', '<button type="button" class="btn btn-primary" data-act="join" data-v="cli">Post a job</button>')) +
-        promo('Hiring? Post a job for free', 'Posting is free. You deposit money only when you hire someone.', 'Post a job', 'cli');
-      else s += secHead('Freelancers on PadiHire', d.freelancers.length ? '<a class="see" href="#/freelancers">See all</a>' : '') + (d.freelancers.length ? '<div class="rows">' + d.freelancers.map(frow).join('') + '</div>' : emptyBox('No freelancers yet', 'Create the first profile and start getting work.', '<button type="button" class="btn btn-primary" data-act="join" data-v="fre">Create a profile</button>')) +
-        promo('Looking for work?', 'Create a free profile and send proposals to clients across Nigeria.', 'Create a profile', 'fre');
-      return s + '</div>' + visitorSide() + '</div>';
+      return '<section class="hero"><div class="wrap home"><h1>Get work done by trusted Nigerian freelancers</h1>' +
+        '<form class="hero-search" id="x-search" role="search" novalidate><label>' + ic('search') + '<input id="x-search-in" type="search" placeholder="Logo, flyer, website…" aria-label="Search jobs" enterkeyhint="search"></label><button type="submit" class="btn">Search</button></form>' +
+        '<div class="hero-btns"><button type="button" class="btn hb-1" data-act="join" data-v="cli">Hire a padi</button><button type="button" class="btn hb-2" data-act="join" data-v="fre">Find work</button></div></div></section>' +
+        '<div class="wrap scr home">' + secHead('Categories', '<a class="see" href="#/jobs">See all jobs</a>') +
+        '<div class="cat-grid">' + CATS.map(function (c) { return '<a class="cat-tile" href="#/jobs?cat=' + c.id + '"><span class="ct-ic">' + ic(CAT_IC[c.id] || 'briefcase') + '</span>' + esc(c.short) + '</a>'; }).join('') + '</div>' +
+        '<div class="trust"><span class="tr-ic">' + ic('shield') + '</span><span class="tr-t"><strong>Your money is safe</strong><span class="small">You pay into escrow. The freelancer is paid only when you approve the work.</span></span><button type="button" class="link-btn" data-act="help">How it works</button></div>' +
+        secHead('New jobs', d.jobs.length ? '<a class="see" href="#/jobs">See all</a>' : '') +
+        (d.jobs.length ? '<div class="cards">' + d.jobs.map(jcard).join('') + '</div>' : emptyBox('No jobs yet', 'Be the first to post a job. Posting is free, and you only pay when you hire.', '<button type="button" class="btn btn-primary" data-act="join" data-v="cli">Post a job</button>')) +
+        promo('Looking for work?', 'Create a free profile and send proposals to clients across Nigeria.', 'Create a profile', 'fre') + '</div>';
     }
   };
   function visitorSide() {
@@ -353,6 +387,27 @@
     var parts = [u.title, u.about && u.about.length >= 40, u.skills.length >= 1, u.rate_from > 0, u.cv, u.bank && u.bank.acct];
     return Math.round(parts.filter(Boolean).length / parts.length * 100);
   }
+  V.home = {
+    need: 'fre', title: function () { return 'Home'; },
+    load: function () {
+      var u = U();
+      return Promise.all([api('GET', 'jobs?limit=6' + (u.cat ? '&cat=' + u.cat : '')), api('GET', 'proposals')]).then(function (r) {
+        if (r[0].jobs.length || !u.cat) return { jobs: r[0].jobs, props: r[1], all: !u.cat };
+        return api('GET', 'jobs?limit=6').then(function (a) { return { jobs: a.jobs, props: r[1], all: true }; });
+      });
+    },
+    html: function (d) {
+      var u = U(), w = S.me.wallet || {}, score = profileScore(u), sent = d.props.proposals.filter(function (x) { return x.status === 'sent'; }).length, act = S.me.active || 0;
+      return '<div class="wrap scr home">' + hello(greet(), esc(u.name), '<a class="icon-btn" href="#/freelancer/' + u.id + '" aria-label="View your public profile">' + ic('eye') + '</a>') +
+        '<section class="wcard" aria-label="Wallet"><p class="wc-l">Available balance</p><p class="wc-n">' + naira(w.avail) + '</p>' +
+        '<p class="wc-s">' + ic('lock') + (w.escrow_in ? naira(w.escrow_in) + ' held in escrow for you' : 'Client payments are held safely in escrow') + '</p>' +
+        '<div class="wc-btns"><button type="button" class="btn wc-b1" data-act="withdraw">Withdraw</button><a class="btn wc-b2" href="#/wallet">History</a></div></section>' +
+        '<div class="stats">' + stat('#/proposals', sent, sent === 1 ? 'Proposal' : 'Proposals') + stat('#/contracts', act, act === 1 ? 'Active job' : 'Active jobs') + stat('#/proposals', d.props.left, 'Bids left') + '</div>' +
+        (score < 100 ? '<a class="nudge" href="#/edit-profile"><span class="nudge-t"><strong>Your profile is ' + score + '% complete</strong><span class="small">Add your ' + missing(u) + '. Complete profiles get hired more.</span></span><span class="bar"><span style="width:' + score + '%"></span></span></a>' : '') +
+        secHead(d.all ? 'Newest jobs' : 'Jobs for you', '<a class="see" href="#/work">See all</a>') +
+        (d.jobs.length ? '<div class="cards">' + d.jobs.map(jcard).join('') + '</div>' : emptyBox('No jobs here yet', 'New jobs are posted every day. Check back soon, or look in other categories.', '<a class="btn btn-ghost" href="#/work">Browse all jobs</a>')) + '</div>';
+    }
+  };
   V.work = {
     need: 'fre', title: function () { return 'Find work'; },
     load: function () {
@@ -362,7 +417,6 @@
     html: function (d) {
       var u = U(), score = profileScore(u), note = S.wtab === 'best' ? (u.cat ? 'Jobs in ' + CAT[u.cat].label.toLowerCase() + ', newest first' : '') : S.wtab === 'recent' ? 'Newest jobs in every category' : '';
       var s = '<div class="wrap scr with-side"><div class="mcol">' + sbar('x-search', 'Search for jobs') +
-        (score < 100 ? '<div class="pbanner"><div class="pb-top"><strong>Your profile is ' + score + '% complete</strong><span>' + score + '%</span></div><div class="bar"><span style="width:' + score + '%"></span></div><p class="small">Add your headline, a short bio, your skills, your starting price, your CV and your bank account. Complete profiles get hired more.</p><a class="btn btn-ghost btn-sm" href="#/edit-profile">Finish profile</a></div>' : '') +
         utabs('wtab', [['best', 'Best matches'], ['recent', 'Most recent'], ['saved', 'Saved']], S.wtab) + (note ? '<p class="tab-note">' + note + '</p>' : '');
       s += d.jobs.length ? rows(d.jobs) : S.wtab === 'saved' ? emptyBox('No saved jobs', 'Tap the heart on a job to save it for later.') : emptyBox('No jobs here yet', 'New jobs are posted every day. Check back soon, or look in other categories.', '<button type="button" class="btn btn-ghost" data-act="tab" data-tab="wtab" data-v="recent">See all jobs</button>');
       return s + '</div>' + freSide(d.props) + '</div>';
@@ -377,13 +431,14 @@
       sideBox('Your work', '<dl class="kv">' + kv('Active proposals', act) + kv('Proposals left this month', p.left + ' of ' + p.monthly) + kv('Active contracts', S.me.active || 0) + '</dl>', '<a class="link-btn" href="#/proposals">See proposals</a>') +
       '</aside>';
   }
+  function workSeg(cur) { return '<nav class="seg" aria-label="My work">' + [['proposals', 'Proposals'], ['contracts', 'Contracts']].map(function (x) { return '<a href="#/' + x[0] + '"' + (x[0] === cur ? ' aria-current="page"' : '') + '>' + x[1] + '</a>'; }).join('') + '</nav>'; }
   V.proposals = {
     need: 'fre', title: function () { return 'Proposals'; },
     load: function () { return api('GET', 'proposals'); },
     html: function (d) {
       var act = d.proposals.filter(function (p) { return p.status !== 'lost'; }), arch = d.proposals.filter(function (p) { return p.status === 'lost'; });
       var list = S.ptab === 'active' ? act : arch;
-      return '<div class="wrap scr col"><div class="pg-head"><h1 class="pg-title">Proposals</h1><p class="small">' + d.left + ' of ' + d.monthly + ' left this month</p></div>' +
+      return '<div class="wrap scr col"><h1 class="pg-title">My work</h1>' + workSeg('proposals') + '<p class="small" style="margin-top:10px">' + d.left + ' of ' + d.monthly + ' proposals left this month</p>' +
         utabs('ptab', [['active', 'Active (' + act.length + ')'], ['archived', 'Archived (' + arch.length + ')']], S.ptab) +
         (list.length ? '<div class="rows">' + list.map(function (p) {
           var st = p.status === 'hired' ? '<span class="st-line ok-t">' + ic('tick') + 'You were hired. <a class="link-btn" href="#/contracts">See contract</a></span>' : p.status === 'lost' ? '<span class="st-line">This job is closed or another freelancer was hired</span>' : '<span class="st-line">Waiting for ' + esc(p.client) + ' to reply</span>';
@@ -398,7 +453,7 @@
     html: function (d) {
       var act = d.contracts.filter(function (k) { return k.stage === 'active' || k.stage === 'delivered' || k.stage === 'disputed'; }), done = d.contracts.filter(function (k) { return k.stage === 'paid' || k.stage === 'refunded'; });
       var list = S.ktab === 'active' ? act : done;
-      return '<div class="wrap scr col"><h1 class="pg-title">Contracts</h1>' + utabs('ktab', [['active', 'Active (' + act.length + ')'], ['done', 'Completed (' + done.length + ')']], S.ktab) +
+      return '<div class="wrap scr col"><h1 class="pg-title">My work</h1>' + workSeg('contracts') + utabs('ktab', [['active', 'Active (' + act.length + ')'], ['done', 'Completed (' + done.length + ')']], S.ktab) +
         (list.length ? '<div class="rows">' + list.map(function (k) {
           var line = k.stage === 'active' ? '<span class="fund">' + ic('shield') + naira(k.amount) + ' in escrow</span><span>Due ' + dateText(k.due_at) + '</span>'
             : k.stage === 'delivered' ? '<span>Delivered, waiting for approval</span>' : k.stage === 'disputed' ? '<span class="act-t">In dispute. PadiHire is reviewing</span>'
@@ -410,7 +465,7 @@
 
   /* client */
   V.dash = {
-    need: 'cli', title: function () { return 'My jobs'; },
+    need: 'cli', title: function () { return 'Home'; },
     load: function () { return Promise.all([api('GET', 'myjobs'), api('GET', 'wallet'), api('GET', 'freelancers?limit=3')]).then(function (r) { return { jobs: r[0].jobs, wallet: r[1], pros: r[2].freelancers }; }); },
     html: function (d) {
       var u = U(), g = { open: [], progress: [], done: [] };
@@ -419,16 +474,19 @@
         else if (j.contract_id && (j.stage === 'active' || j.stage === 'delivered' || j.stage === 'disputed')) g.progress.push(j);
         else g.done.push(j);
       });
-      var s = '<div class="wrap scr with-side"><div class="mcol"><div class="pg-head"><div><h1 class="pg-title">My jobs</h1><p class="small">' + esc(u.business || u.name) + ' · <a class="link-btn" href="#/wallet">Wallet ' + naira(d.wallet.avail) + '</a></p></div><a class="btn btn-primary btn-sm" href="#/post">' + ic('plus') + 'Post a job</a></div>';
+      var s = '<div class="wrap scr home">' + hello(esc(u.business || 'Welcome back'), 'Hi, ' + esc(first(u.name)), '<a class="icon-btn" href="#/wallet" aria-label="Wallet history">' + ic('wallet') + '</a>') +
+        '<section class="wcard light" aria-label="Wallet"><div class="wc-row"><div><p class="wc-l">Wallet</p><p class="wc-n">' + naira(d.wallet.avail) + '</p><p class="wc-s">' + (d.wallet.escrow_out ? ic('lock') + naira(d.wallet.escrow_out) + ' held in escrow' : 'Add money when you are ready to hire') + '</p></div><button type="button" class="btn btn-primary" data-act="topup">' + ic('plus') + 'Add money</button></div></section>' +
+        '<section class="cta"><h2>Need something done?</h2><p>Post a job for free. Freelancers send you proposals, and you pay only when you hire.</p><a class="btn btn-primary" href="#/post">' + ic('plus') + 'Post a job</a></section>';
       d.jobs.filter(function (j) { return j.stage === 'delivered'; }).forEach(function (j) { s += '<div class="flag"><p><strong>' + esc(j.fre_name) + '</strong> delivered “' + esc(j.title) + '”. Review it to release ' + naira(j.amount) + '.</p><a class="btn btn-dark btn-sm" href="#/chat/' + j.thread_id + '">Review</a></div>'; });
       d.wallet.topups.filter(function (t) { return t.status === 'pending'; }).forEach(function (t) { s += '<div class="flag"><p>We’re checking your transfer of <strong>' + naira(t.amount) + '</strong> (reference ' + esc(t.ref) + '). Your wallet updates once it’s confirmed.</p></div>'; });
-      s += utabs('ctab', [['open', 'Open (' + g.open.length + ')'], ['progress', 'In progress (' + g.progress.length + ')'], ['done', 'Completed (' + g.done.length + ')']], S.ctab);
+      if (!g[S.ctab].length && !(S.picked && S.picked.ctab)) { var alt = ['progress', 'open', 'done'].filter(function (k) { return g[k].length; })[0]; if (alt) S.ctab = alt; }
+      s += secHead('Your jobs') + utabs('ctab', [['open', 'Open (' + g.open.length + ')'], ['progress', 'In progress (' + g.progress.length + ')'], ['done', 'Completed (' + g.done.length + ')']], S.ctab);
       var list = g[S.ctab];
-      s += list.length ? '<div class="rows">' + list.map(cjrow).join('') + '</div>'
-        : S.ctab === 'open' ? emptyBox(d.jobs.length ? 'No open jobs' : 'Post your first job', 'Posting is free. Freelancers send you proposals, and you deposit money only when you hire someone.', '<a class="btn btn-primary" href="#/post">Post a job</a>')
+      s += list.length ? '<div class="cards one">' + list.map(cjcard).join('') + '</div>'
+        : S.ctab === 'open' ? emptyBox(d.jobs.length ? 'No open jobs' : 'No jobs yet', d.jobs.length ? 'Jobs you post show here while freelancers send proposals.' : 'Your jobs show here after you post one. Posting is free.')
         : emptyBox(S.ctab === 'progress' ? 'Nothing in progress' : 'No completed jobs yet', S.ctab === 'progress' ? 'When you hire someone, the job shows here until you approve the work.' : 'Jobs you have paid for or closed show here.');
       if (d.pros.length) s += secHead('Freelancers you may like', '<a class="see" href="#/freelancers">See all</a>') + '<div class="rows">' + d.pros.map(frow).join('') + '</div>';
-      return s + '</div>' + cliSide(d.wallet) + '</div>';
+      return s + '</div>';
     }
   };
   function cjrow(j) {
@@ -674,14 +732,16 @@
   /* ---------- chrome ---------- */
   var NAV = {
     visitor: [['explore', 'Home', 'home'], ['jobs', 'Jobs', 'search'], ['freelancers', 'Freelancers', 'users'], ['login', 'Log in', 'user']],
-    fre: [['work', 'Find work', 'search'], ['proposals', 'Proposals', 'doc'], ['contracts', 'Contracts', 'briefcase'], ['messages', 'Messages', 'chat'], ['wallet', 'Wallet', 'wallet']],
-    cli: [['dash', 'My jobs', 'briefcase'], ['freelancers', 'Talent', 'users'], ['post', 'Post a job', 'plus'], ['messages', 'Messages', 'chat'], ['wallet', 'Wallet', 'wallet']]
+    fre: [['home', 'Home', 'home'], ['work', 'Find work', 'search'], ['proposals', 'My work', 'briefcase'], ['messages', 'Chats', 'chat'], ['account', 'Me', 'user']],
+    cli: [['dash', 'Home', 'home'], ['freelancers', 'Talent', 'users'], ['post', 'Post a job', 'plus'], ['messages', 'Chats', 'chat'], ['account', 'Me', 'user']]
   };
   function navKey(v) {
     if (v === 'job') return role() === 'fre' ? 'work' : role() === 'cli' ? 'dash' : 'jobs';
     if (v === 'chat') return 'messages';
     if (v === 'freelancer') return 'freelancers';
     if (v === 'myjob') return 'dash';
+    if (v === 'contracts') return 'proposals';
+    if (v === 'wallet') return role() === 'cli' ? 'dash' : 'home';
     if (v === 'join') return 'login';
     if (v === 'edit-profile' || v === 'terms' || v === 'privacy' || v === 'setup') return 'account';
     return v;
@@ -692,11 +752,16 @@
     var right = !u ? '<a class="login" href="#/login">Log in</a><button type="button" class="btn btn-primary btn-sm" data-act="join">Sign up</button>'
       : '<a class="me-btn" href="#/account" aria-label="Your account"' + (S.view === 'account' ? ' aria-current="page"' : '') + '>' + face(u.name) + '</a>';
     $('#top').innerHTML = '<div class="wrap top-in">' + brandHtml('#/', 'PadiHire home') +
-      '<nav class="nav" aria-label="Main">' + items.filter(function (it) { return it[0] !== 'login'; }).map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
+      '<nav class="nav" aria-label="Main">' + items.filter(function (it) { return it[0] !== 'login' && it[0] !== 'account'; }).map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
       '<div class="top-right">' + right + '</div></div>';
     footer();
+    document.body.classList.toggle('hero-top', S.view === 'explore' && !u);
     var tabs = $('#tabs'); tabs.style.setProperty('--n', items.length);
-    tabs.innerHTML = items.map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + ic(it[2]) + it[1] + badge(it[0]) + '</a>'; }).join('');
+    tabs.innerHTML = items.map(function (it) {
+      var cur = it[0] === key ? ' aria-current="page"' : '';
+      if (it[0] === 'post') return '<a class="fab" href="#/post"' + cur + '><span class="fab-c">' + ic('plus') + '</span>Post</a>';
+      return '<a href="#/' + it[0] + '"' + cur + '>' + ic(it[2]) + it[1] + badge(it[0]) + '</a>';
+    }).join('');
   }
   function footer() {
     var f = $('#foot'), on = !U();
@@ -795,7 +860,7 @@
       case 'reload': router(true); break;
       case 'help': modalHelp(); break;
       case 'tab':
-        S[el.getAttribute('data-tab')] = v;
+        S[el.getAttribute('data-tab')] = v; S.picked = S.picked || {}; S.picked[el.getAttribute('data-tab')] = 1;
         if (el.getAttribute('data-tab') === 'wtab' || el.getAttribute('data-tab') === 'xmode') router(true); else rerender();
         break;
       case 'join': closeModal(); S.join = { step: v ? 2 : 1, role: v || null }; go('join'); break;
