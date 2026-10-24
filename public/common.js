@@ -97,6 +97,10 @@ function api(method, path, body) {
   var opts = { method: method, headers: {}, credentials: 'same-origin' };
   if (body !== undefined || method === 'POST') { opts.headers['content-type'] = 'application/json'; opts.body = JSON.stringify(body || {}); }
   return fetch('/api/' + path, opts).then(function (r) {
+    if ((r.headers.get('content-type') || '').indexOf('application/json') < 0) {
+      var e0 = new Error('The PadiHire server isn\u2019t answering yet. Check that the functions folder is in GitHub and the DB binding is added, then redeploy.');
+      e0.status = 503; e0.data = {}; e0.setup = true; throw e0;
+    }
     return r.json().catch(function () { return {}; }).then(function (d) {
       if (!r.ok) { var e = new Error(d.error || 'Something went wrong. Please try again.'); e.status = r.status; e.data = d; throw e; }
       return d;
@@ -147,3 +151,38 @@ function busy(btn, on, text) {
 }
 function kv(k, v, tot) { return '<div' + (tot ? ' class="tot"' : '') + '><dt>' + k + '</dt><dd>' + v + '</dd></div>'; }
 function li(s) { return '<li>' + esc(s) + '</li>'; }
+
+/* Skills people can pick (search across all; custom skills allowed) */
+var SKILLS = {
+  design: ['Logo design', 'Branding', 'Flyer design', 'Social media design', 'Canva', 'Photoshop', 'Illustrator', 'CorelDRAW', 'Figma', 'UI/UX design', 'Packaging design', 'Business card design', 'Banner design', 'Menu design', 'Infographics', 'Print design', 'Brand identity', 'Product mockups', 'Illustration', 'T-shirt design'],
+  writing: ['Copywriting', 'Content writing', 'Blog writing', 'Article writing', 'Proofreading', 'Editing', 'Translation', 'Yoruba translation', 'Hausa translation', 'Igbo translation', 'Pidgin English', 'CV writing', 'Cover letters', 'Product descriptions', 'Scriptwriting', 'Ghostwriting', 'Technical writing', 'Grant writing', 'Transcription', 'SEO writing'],
+  web: ['WordPress', 'Shopify', 'WooCommerce', 'Website design', 'Landing pages', 'HTML/CSS', 'JavaScript', 'React', 'PHP', 'Laravel', 'Node.js', 'Python', 'Flutter', 'React Native', 'Android apps', 'iOS apps', 'Paystack integration', 'Flutterwave integration', 'Bug fixing', 'Website speed'],
+  video: ['Video editing', 'CapCut', 'Premiere Pro', 'After Effects', 'Motion graphics', 'Reels', 'TikTok videos', 'YouTube editing', 'Videography', 'Photography', 'Photo editing', 'Colour grading', '2D animation', 'Subtitles', 'Music videos', 'Event coverage', 'Drone footage', 'Voice-over', 'Sound editing', 'Video ads'],
+  social: ['Social media management', 'Instagram', 'TikTok', 'Facebook', 'X (Twitter)', 'LinkedIn', 'Content calendar', 'Community management', 'Meta Ads', 'Google Ads', 'Influencer marketing', 'Email marketing', 'SEO', 'Digital marketing', 'Brand strategy', 'Ad copy', 'WhatsApp Business', 'Analytics', 'Content creation', 'UGC'],
+  admin: ['Data entry', 'Excel', 'Google Sheets', 'Virtual assistant', 'Customer service', 'Typing', 'Online research', 'Bookkeeping', 'Accounting', 'Invoicing', 'Email management', 'Calendar management', 'Lead generation', 'Cold calling', 'PowerPoint', 'Document formatting', 'CRM', 'Project management', 'Order processing', 'Inventory']
+};
+function skillSearch(q, cat, taken) {
+  var t = String(q || '').trim().toLowerCase(), out = [], seen = {};
+  (taken || []).forEach(function (s) { seen[s.toLowerCase()] = 1; });
+  var cats = (cat && SKILLS[cat] ? [cat] : []).concat(Object.keys(SKILLS).filter(function (k) { return k !== cat; }));
+  cats.forEach(function (k) { SKILLS[k].forEach(function (s) { var l = s.toLowerCase(); if (!seen[l] && (!t || l.indexOf(t) >= 0)) { seen[l] = 1; out.push(s); } }); });
+  if (t) out.sort(function (a, b) { return (a.toLowerCase().indexOf(t) === 0 ? 0 : 1) - (b.toLowerCase().indexOf(t) === 0 ? 0 : 1); });
+  return out.slice(0, t ? 8 : 10);
+}
+
+/* Files */
+ICONS.clip = '<path d="M20.5 11.5l-8.2 8.2a5.2 5.2 0 0 1-7.4-7.4l8.6-8.6a3.5 3.5 0 0 1 4.9 4.9l-8.5 8.5a1.7 1.7 0 0 1-2.5-2.5l7.8-7.8"/>';
+ICONS.file = '<path d="M14 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3.5V8h4.5"/>';
+function fileSize(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+function upload(file, kind) {
+  return fetch('/api/files?kind=' + kind, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name) }, body: file })
+    .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { if (!r.ok) throw new Error(d.error || 'Upload failed. Please try again.'); return d; }); },
+      function () { throw new Error('Upload failed. Check your connection and try again.'); });
+}
+function fileLink(f) {
+  var url = '/api/files/' + f.id;
+  if (f.image) return '<a class="att-img" href="' + url + '" target="_blank" rel="noopener"><img src="' + url + '" alt="' + esc(f.name) + '" loading="lazy"></a>';
+  return '<a class="att-file" href="' + url + '" target="_blank" rel="noopener">' + ic('file') + '<span>' + esc(f.name) + '</span><small>' + fileSize(f.size) + '</small></a>';
+}
+function filesBlock(list) { return list && list.length ? '<span class="att-row">' + list.map(fileLink).join('') + '</span>' : ''; }
+var MASK_NOTE = 'Contact details and talk of dealing outside PadiHire were hidden (****). Keep chats and payments on PadiHire to stay protected.';

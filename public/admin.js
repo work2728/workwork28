@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var A = { tab: 'overview', sub: 'pending', data: null, q: '' };
-  var TABS = [['overview', 'Overview'], ['topups', 'Top-ups'], ['withdrawals', 'Withdrawals'], ['disputes', 'Disputes'], ['reports', 'Reports'], ['users', 'Users'], ['settings', 'Settings']];
+  var TABS = [['overview', 'Overview'], ['topups', 'Top-ups'], ['withdrawals', 'Withdrawals'], ['disputes', 'Disputes'], ['flags', 'Flags'], ['reports', 'Reports'], ['users', 'Users'], ['settings', 'Settings']];
 
   function chrome(counts) {
     $('#top').innerHTML = '<div class="wrap top-in"><a class="brand" href="/#/">Padi<b>Hire</b></a><span class="adm-tag">Admin</span><div class="top-right"><a class="login" href="/#/">Back to site</a></div></div>';
@@ -14,7 +14,7 @@
   var counts = {};
   function loadCounts() {
     return api('GET', 'admin/summary').then(function (s) {
-      counts = { topups: s.pending_topups.n, withdrawals: s.pending_withdrawals.n, disputes: s.disputes, reports: s.reports };
+      counts = { topups: s.pending_topups.n, withdrawals: s.pending_withdrawals.n, disputes: s.disputes, reports: s.reports, flags: s.flags };
       chrome(counts); return s;
     });
   }
@@ -27,7 +27,7 @@
       return loadCounts().then(function (s) {
         var m = s.money, ok = m.difference === 0;
         return '<h1 class="pg-title">Overview</h1>' +
-          '<div class="adm-stats">' + [['Waiting top-ups', s.pending_topups.n, naira(s.pending_topups.s), 'topups'], ['Waiting withdrawals', s.pending_withdrawals.n, naira(s.pending_withdrawals.s), 'withdrawals'], ['Disputes', s.disputes, '', 'disputes'], ['Reports', s.reports, '', 'reports']].map(function (x) {
+          '<div class="adm-stats">' + [['Waiting top-ups', s.pending_topups.n, naira(s.pending_topups.s), 'topups'], ['Waiting withdrawals', s.pending_withdrawals.n, naira(s.pending_withdrawals.s), 'withdrawals'], ['Disputes', s.disputes, '', 'disputes'], ['Flagged messages', s.flags, '', 'flags']].map(function (x) {
             return '<button type="button" class="adm-stat" data-act="tab" data-v="' + x[3] + '"><span class="small">' + x[0] + '</span><b>' + x[1] + '</b>' + (x[2] ? '<span class="small">' + x[2] + '</span>' : '') + '</button>';
           }).join('') + '</div>' +
           '<section class="d-block"><h2 class="sub">Money check</h2><dl class="kv">' + kv('Confirmed top-ups', naira(m.confirmed_topups)) + kv('Paid out to banks', '−' + naira(m.paid_withdrawals)) + kv('Should be in your bank account', naira(m.bank_should_hold), true) + '</dl>' +
@@ -71,6 +71,21 @@
           }).join('') + '</div>' : empty('No disputes'));
       });
     },
+    flags: function () {
+      return api('GET', 'admin/flags?status=' + (A.sub === 'reviewed' ? 'reviewed' : 'open')).then(function (d) {
+        A.data = d.flags;
+        var where = { message: 'Chat message', proposal: 'Proposal', job: 'Job post', profile: 'Profile' };
+        return '<h1 class="pg-title">Flags</h1><p class="pg-sub">Attempts to share contact details or deal outside PadiHire. The other person saw **** instead. The original text is shown here only.</p>' + subTabs(['pending', 'reviewed']) +
+          (d.flags.length ? '<div class="rows">' + d.flags.map(function (g) {
+            return '<article class="jrow adm-row">' + who(g) + '<p class="small">' + esc(where[g.context] || g.context) + ' \u00B7 ' + timeText(g.created_at) + ' \u00B7 ' + g.total + (g.total === 1 ? ' flag' : ' flags') + ' in total' + (g.user_status !== 'active' ? ' \u00B7 <strong class="act-t">Suspended</strong>' : '') + '</p>' +
+              '<p class="prop-note">\u201C' + esc(g.original) + '\u201D</p><p class="small">Found: ' + esc(g.reasons) + '</p>' +
+              '<div class="prop-btns wrap-btns">' + (g.context === 'message' ? '<button type="button" class="btn btn-ghost btn-sm" data-act="chat" data-id="' + g.ref_id + '">Read chat</button>' : '') +
+              (g.context === 'job' || g.context === 'proposal' ? '<a class="btn btn-ghost btn-sm" href="/#/job/' + g.ref_id + '" target="_blank">Open job</a>' : '') +
+              (g.status === 'open' ? '<button type="button" class="btn btn-ghost btn-sm" data-act="flag-ok" data-id="' + g.id + '">Mark reviewed</button>' : '') +
+              (g.user_status === 'active' ? '<button type="button" class="btn btn-ghost btn-sm" data-act="suspend" data-id="' + g.user_id + '">Suspend user</button>' : '') + '</div></article>';
+          }).join('') + '</div>' : empty('Nothing flagged'));
+      });
+    },
     reports: function () {
       return api('GET', 'admin/reports').then(function (d) {
         return '<h1 class="pg-title">Reports</h1>' + (d.reports.length ? '<div class="rows">' + d.reports.map(function (r) {
@@ -101,6 +116,7 @@
           '<h2 class="sub" style="margin-top:28px">Fees and limits</h2><p class="small">Changes apply to new hires only. Existing contracts keep the fee they started with.</p>' +
           '<div class="field-row">' + inp('client_fee_pct', 'Client service fee (%)', s.client_fee_pct, 'Added when a client hires', 'numeric') + inp('fre_fee_pct', 'Freelancer fee (%)', s.fre_fee_pct, 'Taken from what they earn', 'numeric') + '</div>' +
           '<div class="field-row">' + inp('monthly_proposals', 'Free proposals per month', s.monthly_proposals, '', 'numeric') + inp('auto_release_days', 'Auto-release after delivery (days)', s.auto_release_days, '', 'numeric') + '</div>' +
+          '<h2 class="sub" style="margin-top:28px">Contact blocking</h2>' + field('st-mask_after_hire', 'Hide contact details after a hire too', '<select id="st-mask_after_hire"><option value="1"' + (s.mask_after_hire ? ' selected' : '') + '>Yes, always hide them</option><option value="0"' + (s.mask_after_hire ? '' : ' selected') + '>No, allow them once hired</option></select>', 'Before a hire they are always hidden.') +
           '<h2 class="sub" style="margin-top:28px">Support</h2>' + inp('support_whatsapp', 'Support WhatsApp number', s.support_whatsapp, 'Shown for forgotten passwords and help', 'tel') +
           '<button type="submit" class="btn btn-primary full">Save settings</button></form>';
       });
@@ -160,6 +176,7 @@
         break;
       case 'rm-job': after(api('POST', 'admin/jobs/' + id + '/remove'), 'Job removed'); break;
       case 'rp-close': after(api('POST', 'admin/reports/' + id + '/close'), 'Report dismissed'); break;
+      case 'flag-ok': after(api('POST', 'admin/flags/' + id + '/dismiss'), 'Marked as reviewed'); break;
       case 'suspend': if (el.dataset.armed) { after(api('POST', 'admin/users/' + id + '/suspend'), 'User suspended'); } else { el.dataset.armed = '1'; el.textContent = 'Tap again to suspend'; } break;
       case 'unsuspend': after(api('POST', 'admin/users/' + id + '/unsuspend'), 'User unsuspended'); break;
       case 'reset':
@@ -181,7 +198,7 @@
     else if (f.id === 'u-search') { A.q = $('#u-q').value.trim(); render(); }
     else if (f.id === 'f-settings') {
       var body = {};
-      ['bank_name', 'bank_acct', 'bank_holder', 'client_fee_pct', 'fre_fee_pct', 'monthly_proposals', 'auto_release_days', 'support_whatsapp'].forEach(function (k) { body[k] = $('#st-' + k).value.trim(); });
+      ['bank_name', 'bank_acct', 'bank_holder', 'client_fee_pct', 'fre_fee_pct', 'monthly_proposals', 'auto_release_days', 'mask_after_hire', 'support_whatsapp'].forEach(function (k) { body[k] = $('#st-' + k).value.trim(); });
       api('POST', 'admin/settings', body).then(function () { toast('Settings saved'); render(); }, function (er) { toast(er.message); });
     }
   });

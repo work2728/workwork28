@@ -5,7 +5,8 @@
   var S = {
     me: { user: null }, view: '', arg: '', qs: null, data: null, seq: 0, navs: 0,
     q: blankQ(), xmode: 'jobs', wtab: 'best', ptab: 'active', ktab: 'active', ctab: 'open', mtab: 'props', pcat: '',
-    join: { step: 1, role: null }, next: '', poll: null, mePoll: null
+    join: { step: 1, role: null }, next: '', poll: null, mePoll: null,
+    picks: {}, att: { apply: [], msg: [] }, cv: undefined
   };
   function blankQ() { return { q: '', cat: '', city: '', budget: '', level: '', verified: '', remote: '', today: '', sort: 'new' }; }
   function U() { return S.me.user; }
@@ -42,8 +43,13 @@
       clearTimeout(slow);
       if (seq !== S.seq) return;
       S.data = data;
-      $('#app').innerHTML = v.html(data, arg);
-      if (v.after) v.after(data, arg);
+      try {
+        $('#app').innerHTML = v.html(data, arg);
+        if (v.after) v.after(data, arg);
+      } catch (err) {
+        console.error(err);
+        $('#app').innerHTML = '<div class="wrap scr col">' + emptyBox('Something went wrong', 'This page couldn\u2019t be shown. Please reload and try again.', '<button type="button" class="btn btn-ghost" data-act="reload">Reload</button>') + '</div>';
+      }
       document.title = (v.title ? v.title(data) + ' · ' : '') + 'PadiHire';
       window.scrollTo(0, keep && !changed ? y : 0);
     }, function (e) {
@@ -97,6 +103,71 @@
   function cityOptions(any, remote) { return (any ? '<option value="">' + any + '</option>' : '') + (remote ? '<option value="Remote">' + remote + '</option>' : '') + CITIES.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '<option>Other</option>'; }
   function promo(title, body, btn, r) { return '<div class="promo"><div><h2>' + title + '</h2><p>' + body + '</p></div><button type="button" class="btn btn-dark" data-act="join" data-v="' + r + '">' + btn + '</button></div>'; }
   function sideBox(title, body, link) { return '<section class="side-box">' + (title ? '<h2 class="sb-h">' + title + '</h2>' : '') + body + (link || '') + '</section>'; }
+
+  /* ---------- skill picker ---------- */
+  function skillPicker(key, max, selected, cat) {
+    S.picks[key] = { max: max, list: (selected || []).slice(0, max), cat: cat || '' };
+    return '<div class="skillpick" data-pick="' + key + '"><ul class="chips sp-chips" id="sp-' + key + '-chips">' + spChips(key) + '</ul>' +
+      '<div class="sp-search">' + ic('search') + '<label class="sr-only" for="sp-' + key + '-in">Search skills</label><input id="sp-' + key + '-in" class="sp-input" data-pick="' + key + '" type="text" autocomplete="off" placeholder="Search skills, e.g. Canva"></div>' +
+      '<div class="sp-sugs" id="sp-' + key + '-sugs">' + spSugs(key, '') + '</div><p class="hint" id="sp-' + key + '-count">' + spCount(key) + '</p></div>';
+  }
+  function spChips(key) { return S.picks[key].list.map(function (sk) { return '<li class="sp-chip">' + esc(sk) + '<button type="button" data-act="sp-del" data-pick="' + key + '" data-v="' + esc(sk) + '" aria-label="Remove ' + esc(sk) + '">' + ic('close') + '</button></li>'; }).join(''); }
+  function spCount(key) { var p = S.picks[key]; return p.list.length + ' of ' + p.max + ' chosen' + (p.list.length >= p.max ? '. Remove one to pick another.' : ''); }
+  function spSugs(key, q) {
+    var p = S.picks[key]; if (p.list.length >= p.max) return '';
+    var list = skillSearch(q, p.cat, p.list), t = String(q || '').trim(), exact = list.some(function (x) { return x.toLowerCase() === t.toLowerCase(); });
+    var out = list.map(function (sk) { return '<button type="button" data-act="sp-add" data-pick="' + key + '" data-v="' + esc(sk) + '">' + esc(sk) + '</button>'; }).join('');
+    if (t.length >= 2 && !exact) out += '<button type="button" class="sp-custom" data-act="sp-add" data-pick="' + key + '" data-v="' + esc(t.slice(0, 30)) + '">' + ic('plus') + 'Add \u201C' + esc(t.slice(0, 30)) + '\u201D</button>';
+    return out;
+  }
+  function spRefresh(key) {
+    $('#sp-' + key + '-chips').innerHTML = spChips(key);
+    var inp = $('#sp-' + key + '-in');
+    $('#sp-' + key + '-sugs').innerHTML = spSugs(key, inp ? inp.value : '');
+    $('#sp-' + key + '-count').textContent = spCount(key);
+  }
+
+  /* ---------- attachments ---------- */
+  var UP_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.png,.jpg,.jpeg,.webp,.gif,.zip,.psd,.ai,.mp4,.mov,.mp3';
+  function attList(key) {
+    return S.att[key].map(function (f, i) {
+      return '<li class="att-chip' + (f.busy ? ' busy' : '') + '">' + ic(f.image ? 'eye' : 'file') + '<span>' + esc(f.name) + '</span><small>' + (f.busy ? 'Uploading\u2026' : fileSize(f.size)) + '</small>' +
+        (f.busy ? '' : '<button type="button" data-act="att-del" data-k="' + key + '" data-i="' + i + '" aria-label="Remove ' + esc(f.name) + '">' + ic('close') + '</button>') + '</li>';
+    }).join('');
+  }
+  function attRefresh(key) { var el = $('#att-' + key); if (el) el.innerHTML = attList(key); }
+  function attBox(key, max, label) {
+    if (!S.me.uploads) return '';
+    return '<div class="att-box"><label class="btn btn-ghost btn-sm att-add" for="up-' + key + '">' + ic('clip') + label + '</label><input type="file" id="up-' + key + '" class="sr-only" data-up="' + key + '" data-max="' + max + '" accept="' + UP_ACCEPT + '" multiple><ul class="att-list" id="att-' + key + '">' + attList(key) + '</ul></div>';
+  }
+  function handleFiles(el) {
+    var key = el.getAttribute('data-up'), files = Array.prototype.slice.call(el.files || []);
+    el.value = '';
+    if (key === 'cv') return handleCv(files[0]);
+    var max = +el.getAttribute('data-max'), kind = key === 'msg' ? 'message' : 'proposal';
+    var room = max - S.att[key].length;
+    if (files.length > room) toast('You can attach up to ' + max + ' files.');
+    files.slice(0, Math.max(0, room)).forEach(function (file) {
+      if (file.size > 20 * 1048576) { toast(file.name + ' is over 20 MB.'); return; }
+      var item = { name: file.name, size: file.size, busy: true };
+      S.att[key].push(item); attRefresh(key);
+      upload(file, kind).then(function (r) { Object.assign(item, r, { busy: false }); attRefresh(key); }, function (er) { S.att[key] = S.att[key].filter(function (x) { return x !== item; }); attRefresh(key); toast(er.message); });
+    });
+  }
+  function cvBlock() {
+    var cv = S.cv === undefined ? U().cv : S.cv;
+    if (!S.me.uploads) return '<p class="small">CV upload will be available soon.</p>';
+    return '<div class="cv-box" id="cv-box">' + (cv ? (cv.busy ? '<p class="att-chip busy">' + ic('file') + '<span>' + esc(cv.name) + '</span><small>Uploading\u2026</small></p>'
+      : '<p class="att-chip">' + ic('file') + '<span>' + esc(cv.name) + '</span>' + (cv.id ? '<a class="link-btn small-link" href="/api/files/' + cv.id + '" target="_blank" rel="noopener">View</a>' : '') + '<button type="button" data-act="cv-del" aria-label="Remove CV">' + ic('close') + '</button></p>') : '') +
+      '<label class="btn btn-ghost btn-sm att-add" for="up-cv">' + ic('clip') + (cv ? 'Replace CV' : 'Upload CV') + '</label><input type="file" id="up-cv" class="sr-only" data-up="cv" accept=".pdf,.doc,.docx">' +
+      '<p class="hint">PDF or Word, up to 5 MB. Remove your phone number, email and social handles from your CV first. Clients contact you through PadiHire.</p></div>';
+  }
+  function handleCv(file) {
+    if (!file) return;
+    if (file.size > 5 * 1048576) { toast('Your CV must be 5 MB or less.'); return; }
+    S.cv = { name: file.name, busy: true }; $('#cv-box').outerHTML = cvBlock();
+    upload(file, 'cv').then(function (r) { S.cv = r; $('#cv-box').outerHTML = cvBlock(); toast('CV uploaded. Save your profile to keep it.'); }, function (er) { S.cv = undefined; $('#cv-box').outerHTML = cvBlock(); toast(er.message); });
+  }
 
   /* ---------- views ---------- */
   var V = {};
@@ -222,7 +293,8 @@
         '<p class="fr-meta">' + (p.city ? '<span>' + ic('pin') + esc(p.city) + '</span>' : '') + stars(p.rating, p.reviews) + '<span>' + p.jobs_done + (p.jobs_done === 1 ? ' job done' : ' jobs done') + '</span></p></div></div>' +
         (act ? '<div class="pf-act">' + act + '</div>' : '') +
         '<section class="d-block"><h2 class="sub">About</h2><p class="d-desc">' + esc(p.about || 'No bio yet.') + '</p>' + (p.skills.length ? '<ul class="chips" style="margin-top:12px">' + p.skills.map(li).join('') + '</ul>' : '') + '</section>' +
-        '<section class="d-block"><dl class="kv">' + kv('Category', esc(CAT[p.cat].label)) + (p.rate_from ? kv('Jobs from', naira(p.rate_from)) : '') + kv('Member since', new Date(p.since * 1000).getFullYear()) + '</dl></section>' +
+        '<section class="d-block"><dl class="kv">' + kv('Category', esc(CAT[p.cat].label)) + (p.rate_from ? kv('Jobs from', naira(p.rate_from)) : '') + kv('Member since', new Date(p.since * 1000).getFullYear()) +
+        (p.cv ? kv('CV', p.cv.locked ? '<a class="link-btn" href="#/login">Log in to view</a>' : '<a class="link-btn" href="/api/files/' + p.cv.id + '" target="_blank" rel="noopener">' + esc(p.cv.name) + '</a>') : '') + '</dl></section>' +
         '<section class="d-block"><h2 class="sub">Reviews</h2>' + (d.reviews.length ? '<ul class="reviews">' + d.reviews.map(function (r) {
           return '<li><p class="rv-top"><span class="stars">' + ic('star', 'is') + '<b>' + r.stars + '.0</b></span><span class="small">' + esc(r.title) + ' · ' + dateText(r.created_at) + '</span></p>' + (r.note ? '<p>' + esc(r.note) + '</p>' : '') + '<p class="small">' + esc(r.client) + '</p></li>';
         }).join('') + '</ul>' : '<p class="small">No reviews yet.</p>') + '</section></div>';
@@ -270,7 +342,7 @@
 
   /* freelancer */
   function profileScore(u) {
-    var parts = [u.title, u.about && u.about.length >= 40, u.skills.length >= 3, u.rate_from > 0, u.bank && u.bank.acct];
+    var parts = [u.title, u.about && u.about.length >= 40, u.skills.length >= 1, u.rate_from > 0, u.cv, u.bank && u.bank.acct];
     return Math.round(parts.filter(Boolean).length / parts.length * 100);
   }
   V.work = {
@@ -282,7 +354,7 @@
     html: function (d) {
       var u = U(), score = profileScore(u), note = S.wtab === 'best' ? (u.cat ? 'Jobs in ' + CAT[u.cat].label.toLowerCase() + ', newest first' : '') : S.wtab === 'recent' ? 'Newest jobs in every category' : '';
       var s = '<div class="wrap scr with-side"><div class="mcol">' + sbar('x-search', 'Search for jobs') +
-        (score < 100 ? '<div class="pbanner"><div class="pb-top"><strong>Your profile is ' + score + '% complete</strong><span>' + score + '%</span></div><div class="bar"><span style="width:' + score + '%"></span></div><p class="small">Add your headline, a short bio, at least 3 skills, your starting price and your bank account. Complete profiles get hired more.</p><a class="btn btn-ghost btn-sm" href="#/edit-profile">Finish profile</a></div>' : '') +
+        (score < 100 ? '<div class="pbanner"><div class="pb-top"><strong>Your profile is ' + score + '% complete</strong><span>' + score + '%</span></div><div class="bar"><span style="width:' + score + '%"></span></div><p class="small">Add your headline, a short bio, your skills, your starting price, your CV and your bank account. Complete profiles get hired more.</p><a class="btn btn-ghost btn-sm" href="#/setup">Finish profile</a></div>' : '') +
         utabs('wtab', [['best', 'Best matches'], ['recent', 'Most recent'], ['saved', 'Saved']], S.wtab) + (note ? '<p class="tab-note">' + note + '</p>' : '');
       s += d.jobs.length ? rows(d.jobs) : S.wtab === 'saved' ? emptyBox('No saved jobs', 'Tap the heart on a job to save it for later.') : emptyBox('No jobs here yet', 'New jobs are posted every day. Check back soon, or look in other categories.', '<button type="button" class="btn btn-ghost" data-act="tab" data-tab="wtab" data-v="recent">See all jobs</button>');
       return s + '</div>' + freSide(d.props) + '</div>';
@@ -387,7 +459,8 @@
           return '<article class="prop' + (hired ? ' hired' : '') + '"><div class="prop-head">' + face(p.name, 'av-md') +
             '<div style="min-width:0"><p class="fr-name"><a class="name-link" href="#/freelancer/' + p.fre_id + '">' + esc(p.name) + '</a></p><p class="fr-title">' + esc(p.title) + '</p><p class="fr-meta">' + (p.city ? '<span>' + ic('pin') + esc(p.city) + '</span>' : '') + stars(p.rating, p.reviews) + '</p></div>' +
             '<p class="fr-rate"><b>' + naira(p.price) + '</b><span>' + daysText(p.days) + '</span></p></div>' +
-            '<p class="prop-note">' + esc(p.note) + '</p><p class="small">Submitted ' + ago(p.created_at) + '</p>' +
+            '<p class="prop-note">' + esc(p.note) + '</p>' + filesBlock(p.files) +
+            '<p class="small">Submitted ' + ago(p.created_at) + (p.cv ? ' \u00B7 <a class="link-btn" href="/api/files/' + p.cv.id + '" target="_blank" rel="noopener">View CV</a>' : '') + '</p>' +
             (open ? '<div class="prop-btns"><button type="button" class="btn btn-ghost" data-act="msg-pro" data-id="' + p.fre_id + '">Message</button><button type="button" class="btn btn-primary" data-act="hire" data-id="' + p.id + '">Hire</button></div>' : hired ? '<p class="ok-t">' + ic('tick') + 'Hired</p>' : '') + '</article>';
         }).join('') + '</div>' : emptyBox('No proposals yet', 'Freelancers usually reply within a few hours. You can also invite people you like.', open ? '<a class="btn btn-primary" href="#/freelancers">Invite freelancers</a>' : '');
       }
@@ -404,7 +477,7 @@
         '<div class="field-row">' + field('pj-cat', 'Category', '<select id="pj-cat">' + catOptions('Choose a category') + '</select>') + field('pj-level', 'Experience needed', '<select id="pj-level">' + LEVELS.map(function (l) { return '<option' + (l === 'Intermediate' ? ' selected' : '') + '>' + l + '</option>'; }).join('') + '</select>') + '</div>' +
         '<div class="field-row">' + field('pj-budget', 'Budget (₦)', '<input id="pj-budget" type="text" inputmode="numeric" placeholder="25,000">', 'Fixed price for the whole job') + field('pj-days', 'Delivery (days)', '<input id="pj-days" type="text" inputmode="numeric" placeholder="3">') + '</div>' +
         field('pj-city', 'Location', '<select id="pj-city"><option value="Remote">Remote (anywhere in Nigeria)</option>' + cityOptions() + '</select>') +
-        field('pj-skills', 'Skills (optional)', '<input id="pj-skills" type="text" placeholder="e.g. Canva, Flyers, Logo design">', 'Separate with commas') +
+        '<div class="field"><span class="flabel">Skills needed (up to 5)</span>' + skillPicker('pj', 5, [], '') + '</div>' +
         field('pj-descr', 'Describe the job', '<textarea id="pj-descr" rows="6" maxlength="4000" placeholder="What do you need, what will you send the freelancer, and what should they deliver?"></textarea>') +
         '<button type="submit" class="btn btn-primary full">Post job</button></form></div>';
     }
@@ -448,7 +521,7 @@
   }
   function bubble(m) {
     if (m.system) return '<p class="bub sys">' + esc(m.body) + '<small>' + timeText(m.created_at) + '</small></p>';
-    return '<p class="bub' + (m.me ? ' me' : '') + '">' + linkify(esc(m.body)) + '<small>' + timeText(m.created_at) + '</small></p>';
+    return '<p class="bub' + (m.me ? ' me' : '') + '">' + (m.body ? '<span class="bub-text">' + linkify(esc(m.body)) + '</span>' : '') + filesBlock(m.files) + '<small>' + timeText(m.created_at) + '</small></p>';
   }
   function linkify(t) { return t.replace(/\bhttps?:\/\/[^\s<]+/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener nofollow">' + u + '</a>'; }); }
   V.chat = {
@@ -458,12 +531,14 @@
       var t = d.thread, cliR = t.side === 'client', who = cliR ? t.fre : t.client, name = cliR ? t.fre.name : t.client.name;
       return '<div class="wrap scr col"><button type="button" class="back" data-act="back">' + ic('back') + 'Back</button>' +
         '<div class="th-head">' + face(name) + '<div style="min-width:0"><p class="th-name">' + (cliR ? '<a class="name-link" href="#/freelancer/' + who.id + '">' + esc(name) + '</a>' : esc(name)) + '</p><p class="small"><a class="link-btn" href="#/' + (cliR ? 'myjob/' : 'job/') + t.job_id + '">' + esc(t.job) + '</a></p></div></div>' +
-        '<div id="cpanel">' + (t.contract ? contractPanel(t) : '<p class="notice-line">' + ic('shield') + 'Keep payments on PadiHire. Phone numbers and contact links stay hidden until a hire.</p>') + '</div>' +
+        '<div id="cpanel">' + (t.contract ? contractPanel(t) : '<p class="notice-line">' + ic('shield') + 'Keep chats and payments on PadiHire. Phone numbers, emails, WhatsApp and Telegram details are hidden automatically.</p>') + '</div>' +
         (t.contract ? '<h2 class="sub" style="margin-top:22px">Messages</h2>' : '') +
         '<div class="bubbles" id="bubbles">' + (d.messages.length ? d.messages.map(bubble).join('') : '<p class="small" id="no-msgs">Say hello and ask anything about the job.</p>') + '</div>' +
-        (t.side ? '<form id="f-msg" class="composer" novalidate><label class="sr-only" for="m-text">Message ' + esc(name) + '</label><textarea id="m-text" rows="1" placeholder="Write a message" maxlength="2000"></textarea><button type="submit" class="btn btn-primary" aria-label="Send message">' + ic('send') + '</button></form>' : '') + '</div>';
+        (t.side ? '<form id="f-msg" class="composer' + (S.me.uploads ? ' has-att' : '') + '" novalidate>' + (S.me.uploads ? '<label class="att-icon" for="up-msg" aria-label="Attach files">' + ic('clip') + '</label><input type="file" id="up-msg" class="sr-only" data-up="msg" data-max="5" accept="' + UP_ACCEPT + '" multiple>' : '') +
+          '<label class="sr-only" for="m-text">Message ' + esc(name) + '</label><textarea id="m-text" rows="1" placeholder="Write a message" maxlength="2000"></textarea><button type="submit" class="btn btn-primary" aria-label="Send message">' + ic('send') + '</button></form><ul class="att-list" id="att-msg">' + attList('msg') + '</ul>' : '') + '</div>';
     },
     after: function (d) {
+      S.att.msg = []; attRefresh('msg');
       S.lastMsg = d.messages.length ? d.messages[d.messages.length - 1].id : 0;
       S.contractKey = JSON.stringify(d.thread.contract);
       var b = $('#bubbles'); if (b && d.messages.length > 4) { var last = b.lastElementChild; if (last) last.scrollIntoView({ block: 'nearest' }); }
@@ -532,29 +607,31 @@
         mitem('logout', 'Log out', '', 'data-act="signout"') + '</ul></div>';
     }
   };
-  V['edit-profile'] = {
-    need: 'any', title: function () { return 'Edit profile'; },
-    html: function () {
+  function profileHtml(setup) {
       var u = U(), fre = role() === 'fre';
-      return '<div class="wrap scr narrow">' + backBtn() + '<h1 class="pg-title">Edit profile</h1>' +
-        (fre && !u.cat ? '<p class="pg-sub">Set up your freelancer profile so you can send proposals.</p>' : '') +
-        '<form id="f-profile" class="form" novalidate>' +
+      S.cv = undefined;
+      return '<div class="wrap scr narrow">' + (setup ? '' : backBtn()) + '<h1 class="pg-title">' + (setup ? 'Set up your profile' : 'Edit profile') + '</h1>' +
+        (setup ? '<p class="pg-sub">Clients see this when you apply. Pick up to 3 skills and add your CV so you stand out.</p>' : fre && !u.cat ? '<p class="pg-sub">Set up your freelancer profile so you can send proposals.</p>' : '') +
+        '<form id="f-profile" class="form" novalidate data-setup="' + (setup ? 1 : 0) + '">' +
         field('pf-name', 'Full name', '<input id="pf-name" type="text" value="' + esc(u.name) + '" autocomplete="name">') +
         field('pf-city', 'City', '<select id="pf-city">' + cityOptions('Choose your city') + '</select>') +
         (fre ? field('pf-title', 'Headline', '<input id="pf-title" type="text" maxlength="80" value="' + esc(u.title) + '" placeholder="e.g. Brand and social media designer">', 'Shown under your name') +
           field('pf-cat', 'Category', '<select id="pf-cat">' + catOptions('Choose one') + '</select>') +
-          field('pf-skills', 'Skills', '<input id="pf-skills" type="text" value="' + esc(u.skills.join(', ')) + '" placeholder="e.g. Canva, Illustrator, Flyers">', 'Up to 8, separated with commas') +
+          '<div class="field"><span class="flabel">Your skills (up to 3)</span>' + skillPicker('pf', 3, u.skills, u.cat) + '</div>' +
+          '<div class="field"><span class="flabel">CV</span>' + cvBlock() + '</div>' +
           field('pf-rate', 'Jobs from (₦)', '<input id="pf-rate" type="text" inputmode="numeric" value="' + (u.rate_from ? num(u.rate_from) : '') + '" placeholder="15,000">', 'Your usual starting price') +
           field('pf-about', 'About you', '<textarea id="pf-about" rows="5" maxlength="1200" placeholder="What you do, who you have worked for, and how fast you deliver.">' + esc(u.about) + '</textarea>')
           : field('pf-business', 'Business or brand name', '<input id="pf-business" type="text" value="' + esc(u.business) + '">', 'Optional')) +
-        '<button type="submit" class="btn btn-primary full">Save profile</button></form>' +
+        '<button type="submit" class="btn btn-primary full">' + (setup ? 'Save and find work' : 'Save profile') + '</button></form>' +
+        (setup ? '<p class="center-line"><a class="link-btn" href="#/work">Skip for now</a></p>' :
         '<h2 class="sub" style="margin-top:34px">Change password</h2><form id="f-pass" class="form" novalidate>' +
         field('pw-current', 'Current password', '<input id="pw-current" type="password" autocomplete="current-password">') +
         field('pw-password', 'New password', '<input id="pw-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">') +
-        '<button type="submit" class="btn btn-ghost full">Change password</button></form></div>';
-    },
-    after: function () { var u = U(); var c = $('#pf-city'); if (c) c.value = u.city || ''; var k = $('#pf-cat'); if (k) k.value = u.cat || ''; }
-  };
+        '<button type="submit" class="btn btn-ghost full">Change password</button></form>') + '</div>';
+  }
+  function profileAfter() { var u = U(); var c = $('#pf-city'); if (c) c.value = u.city || ''; var k = $('#pf-cat'); if (k) k.value = u.cat || ''; }
+  V['edit-profile'] = { need: 'any', title: function () { return 'Edit profile'; }, html: function () { return profileHtml(false); }, after: profileAfter };
+  V.setup = { need: 'fre', title: function () { return 'Set up your profile'; }, html: function () { return profileHtml(true); }, after: profileAfter };
   V.terms = {
     title: function () { return 'Terms and rules'; },
     html: function () {
@@ -580,7 +657,7 @@
     if (v === 'freelancer') return 'freelancers';
     if (v === 'myjob') return 'dash';
     if (v === 'join') return 'login';
-    if (v === 'edit-profile' || v === 'terms') return 'account';
+    if (v === 'edit-profile' || v === 'terms' || v === 'setup') return 'account';
     return v;
   }
   function chrome() {
@@ -601,10 +678,12 @@
   /* ---------- modals ---------- */
   function gate(r, title, body) { openModal(modalHead(title, body) + '<div class="done-btns"><button type="button" class="btn btn-primary" data-act="join" data-v="' + r + '">' + (r === 'cli' ? 'Sign up as a client' : 'Sign up as a freelancer') + '</button><a class="btn btn-ghost" href="#/login">Log in</a></div>'); }
   function modalApply(j) {
+    S.att.apply = [];
     var pct = j.fre_fee_pct || feePct().fre_fee_pct || 0;
     openModal(modalHead('Submit a proposal', esc(j.title)) + '<form id="f-apply" data-id="' + j.id + '" data-pct="' + pct + '" novalidate>' +
       '<div class="field-row">' + field('ap-price', 'Your bid (₦)', '<input id="ap-price" type="text" inputmode="numeric" value="' + num(j.budget) + '">', 'After the ' + pct + '% fee, you receive ' + naira(j.budget - Math.round(j.budget * pct / 100))) + field('ap-days', 'Days to deliver', '<input id="ap-days" type="text" inputmode="numeric" value="' + j.days + '">') + '</div>' +
       field('ap-note', 'Cover letter', '<textarea id="ap-note" rows="6" maxlength="3000" placeholder="Explain why you are a good fit, and share links to similar work."></textarea>') +
+      (S.me.uploads ? '<div class="field"><span class="flabel">Attachments (optional, up to 3)</span>' + attBox('apply', 3, 'Add files') + '<p class="hint">Samples of your work. Up to 20 MB each.</p></div>' : '') +
       '<p class="small" style="margin-top:12px">If the client hires you, they deposit your price into escrow first. Only start when your contract shows the money is held.</p>' +
       '<div class="modal-actions"><button type="submit" class="btn btn-primary full">Submit proposal</button></div></form>');
   }
@@ -755,6 +834,17 @@
         api('POST', 'contracts/' + id + '/approve').then(function () { closeModal(); router(true); setTimeout(function () { if (S.data && S.data.thread) modalRate(); }, 400); }, function (er) { busy(el, false); toast(er.message); });
         break;
       case 'rate': modalRate(); break;
+      case 'sp-add':
+        var pk = S.picks[el.getAttribute('data-pick')];
+        if (pk && pk.list.length < pk.max && pk.list.map(function (x) { return x.toLowerCase(); }).indexOf(v.toLowerCase()) < 0) pk.list.push(v);
+        var inpA = $('#sp-' + el.getAttribute('data-pick') + '-in'); if (inpA) inpA.value = '';
+        spRefresh(el.getAttribute('data-pick')); break;
+      case 'sp-del':
+        var pk2 = S.picks[el.getAttribute('data-pick')]; pk2.list = pk2.list.filter(function (x) { return x !== v; });
+        spRefresh(el.getAttribute('data-pick')); break;
+      case 'att-del':
+        S.att[el.getAttribute('data-k')].splice(+el.getAttribute('data-i'), 1); attRefresh(el.getAttribute('data-k')); break;
+      case 'cv-del': S.cv = null; $('#cv-box').outerHTML = cvBlock(); break;
       case 'star':
         var n = +v;
         $$('#modal-body .rate button').forEach(function (b) { var kk = +b.getAttribute('data-v'); b.classList.toggle('on', kk <= n); b.setAttribute('aria-checked', String(kk === n)); });
@@ -789,11 +879,12 @@
       fieldErr('jn-terms', '');
       var fre = S.join.role === 'fre';
       run(api('POST', 'auth/signup', { role: S.join.role, name: $('#jn-name').value, email: $('#jn-email').value, phone: $('#jn-phone').value, password: $('#jn-password').value, city: $('#jn-city').value, cat: fre ? $('#jn-cat').value : '', title: fre ? $('#jn-title').value : '', business: fre ? '' : $('#jn-business').value }),
-        function () { loadMe().then(function () { S.join = { step: 1, role: null }; var n = S.next; S.next = ''; if (n && n !== '#/login' && n !== '#/join') location.hash = n; else go(home()); toast('Welcome to PadiHire, ' + first(U().name)); }); }, 'jn-');
+        function () { loadMe().then(function () { S.join = { step: 1, role: null }; var n = S.next; S.next = ''; if (fre) go('setup'); else if (n && n !== '#/login' && n !== '#/join') location.hash = n; else go(home()); toast('Welcome to PadiHire, ' + first(U().name)); }); }, 'jn-');
     } else if (id === 'f-apply') {
-      run(api('POST', 'jobs/' + f.getAttribute('data-id') + '/apply', { price: parseNum($('#ap-price').value), days: parseNum($('#ap-days').value), note: $('#ap-note').value }), function (r) {
-        S.data.job.applied = true; rerender();
-        openModal(doneBox('Proposal submitted', 'The client can now see your bid. You’ll get a message when they reply. ' + r.left + ' proposals left this month.', '<a class="btn btn-primary" href="#/proposals">View proposals</a><button type="button" class="btn btn-ghost" data-act="close">Keep browsing</button>'));
+      if (S.att.apply.some(function (x) { return x.busy; })) { toast('Wait for your files to finish uploading.'); return; }
+      run(api('POST', 'jobs/' + f.getAttribute('data-id') + '/apply', { price: parseNum($('#ap-price').value), days: parseNum($('#ap-days').value), note: $('#ap-note').value, files: S.att.apply.map(function (x) { return x.id; }) }), function (r) {
+        S.data.job.applied = true; S.att.apply = []; rerender();
+        openModal(doneBox('Proposal submitted', (r.masked ? MASK_NOTE + ' ' : '') + 'The client can now see your bid. You\u2019ll get a message when they reply. ' + r.left + ' proposals left this month.', '<a class="btn btn-primary" href="#/proposals">View proposals</a><button type="button" class="btn btn-ghost" data-act="close">Keep browsing</button>'));
       }, 'ap-', 'ap-note');
     } else if (id === 'f-topup') {
       var amt = parseNum($('#tp-amount').value);
@@ -807,11 +898,14 @@
       var reason = ($('input[name=reason]:checked', f) || {}).value;
       run(api('POST', 'jobs/' + f.getAttribute('data-id') + '/report', { reason: reason }), function () { openModal(doneBox('Report sent', 'Thank you. Our team reviews every report.')); });
     } else if (id === 'f-msg') {
-      var m = $('#m-text'), text = m.value.trim(); if (!text) return;
+      var m = $('#m-text'), text = m.value.trim();
+      if (S.att.msg.some(function (x) { return x.busy; })) { toast('Wait for your files to finish uploading.'); return; }
+      var fids = S.att.msg.map(function (x) { return x.id; });
+      if (!text && !fids.length) return;
       busy(btn, true);
-      api('POST', 'threads/' + S.arg + '/messages', { body: text }).then(function (r) {
-        busy(btn, false); m.value = ''; m.style.height = '';
-        if (r.masked) toast('Phone numbers and contact links are hidden until there’s a hire.');
+      api('POST', 'threads/' + S.arg + '/messages', { body: text, files: fids }).then(function (r) {
+        busy(btn, false); m.value = ''; m.style.height = ''; S.att.msg = []; attRefresh('msg');
+        if (r.masked) toast(MASK_NOTE);
         api('GET', 'threads/' + S.arg + '?after=' + S.lastMsg).then(function (d) {
           var b = $('#bubbles'), none = $('#no-msgs'); if (none) none.remove();
           d.messages.forEach(function (mm) { if (!$('[data-mid="' + mm.id + '"]')) b.insertAdjacentHTML('beforeend', bubble(mm).replace('<p class="bub', '<p data-mid="' + mm.id + '" class="bub')); });
@@ -820,20 +914,23 @@
         m.focus();
       }, function (er) { busy(btn, false); toast(er.message); });
     } else if (id === 'f-post') {
-      run(api('POST', 'jobs', { title: $('#pj-title').value, cat: $('#pj-cat').value, level: $('#pj-level').value, budget: parseNum($('#pj-budget').value), days: parseNum($('#pj-days').value) || 3, city: $('#pj-city').value, skills: $('#pj-skills').value, descr: $('#pj-descr').value }),
-        function (r) { S.mtab = 'props'; S.ctab = 'open'; loadMe(); go('myjob/' + r.id); toast('Job posted. Freelancers can now send proposals.'); }, 'pj-');
+      run(api('POST', 'jobs', { title: $('#pj-title').value, cat: $('#pj-cat').value, level: $('#pj-level').value, budget: parseNum($('#pj-budget').value), days: parseNum($('#pj-days').value) || 3, city: $('#pj-city').value, skills: S.picks.pj.list, descr: $('#pj-descr').value }),
+        function (r) { S.mtab = 'props'; S.ctab = 'open'; loadMe(); go('myjob/' + r.id); toast(r.masked ? MASK_NOTE : 'Job posted. Freelancers can now send proposals.'); }, 'pj-');
     } else if (id === 'f-profile') {
       var fr = role() === 'fre';
-      run(api('POST', 'me/profile', { name: $('#pf-name').value, city: $('#pf-city').value, title: fr ? $('#pf-title').value : U().title, cat: fr ? $('#pf-cat').value : U().cat, skills: fr ? $('#pf-skills').value : U().skills, about: fr ? $('#pf-about').value : U().about, rate_from: fr ? parseNum($('#pf-rate').value) : U().rate_from, business: fr ? U().business : $('#pf-business').value }),
-        function () { loadMe().then(function () { toast('Profile saved'); go(fr ? 'work' : 'account'); }); }, 'pf-');
+      if (S.cv && S.cv.busy) { toast('Wait for your CV to finish uploading.'); return; }
+      var body = { name: $('#pf-name').value, city: $('#pf-city').value, title: fr ? $('#pf-title').value : U().title, cat: fr ? $('#pf-cat').value : U().cat, skills: fr ? S.picks.pf.list : U().skills, about: fr ? $('#pf-about').value : U().about, rate_from: fr ? parseNum($('#pf-rate').value) : U().rate_from, business: fr ? U().business : $('#pf-business').value };
+      if (fr && S.cv !== undefined) body.cv_file = S.cv ? S.cv.id : 0;
+      run(api('POST', 'me/profile', body),
+        function (r) { S.cv = undefined; loadMe().then(function () { toast(r.masked ? MASK_NOTE : 'Profile saved'); go(fr ? 'work' : 'account'); }); }, 'pf-');
     } else if (id === 'f-pass') {
       run(api('POST', 'me/password', { current: $('#pw-current').value, password: $('#pw-password').value }), function () { f.reset(); toast('Password changed'); }, 'pw-');
     } else if (id === 'f-deliver' || id === 'f-changes' || id === 'f-dispute') {
       var k = S.data.thread.contract, path = { 'f-deliver': 'deliver', 'f-changes': 'changes', 'f-dispute': 'dispute' }[id];
       var note = $('#nt-note').value.trim();
       if (note.length < (id === 'f-dispute' ? 10 : 5)) { fieldErr('nt-note', id === 'f-dispute' ? 'Explain the problem in a sentence or two.' : 'Add a short note.'); return; }
-      run(api('POST', 'contracts/' + k.id + '/' + path, id === 'f-dispute' ? { reason: note } : { note: note }), function () {
-        closeModal(); toast(id === 'f-deliver' ? 'Marked as delivered' : id === 'f-changes' ? 'Changes requested' : 'Dispute opened. PadiHire will review it.'); router(true);
+      run(api('POST', 'contracts/' + k.id + '/' + path, id === 'f-dispute' ? { reason: note } : { note: note }), function (r) {
+        closeModal(); toast(r.masked ? MASK_NOTE : id === 'f-deliver' ? 'Marked as delivered' : id === 'f-changes' ? 'Changes requested' : 'Dispute opened. PadiHire will review it.'); router(true);
       }, '', 'nt-note');
     } else if (id === 'f-rate') {
       var on = $$('#modal-body .rate button.on').length;
@@ -846,12 +943,19 @@
     var el = e.target;
     if (el.id === 'ap-price') { var f = el.form, pct = +(f.getAttribute('data-pct') || 0), n = parseNum(el.value), h = $('#ap-price-hint'); if (h) h.textContent = 'After the ' + pct + '% fee, you receive ' + naira(n - Math.round(n * pct / 100)); }
     if (el.id === 'm-text') { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; }
+    if (el.classList && el.classList.contains('sp-input')) { var key = el.getAttribute('data-pick'); $('#sp-' + key + '-sugs').innerHTML = spSugs(key, el.value); }
   });
   document.addEventListener('change', function (e) {
     var el = e.target;
+    if (el.matches && el.matches('input[type=file][data-up]')) { handleFiles(el); return; }
+    if (el.id === 'pf-cat' && S.picks.pf) { S.picks.pf.cat = el.value; spRefresh('pf'); }
+    if (el.id === 'pj-cat' && S.picks.pj) { S.picks.pj.cat = el.value; spRefresh('pj'); }
     if (el.hasAttribute && el.hasAttribute('data-q')) { S.q[el.getAttribute('data-q')] = el.value; reloadResults(); }
   });
   document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('sp-input')) {
+      e.preventDefault(); var key = e.target.getAttribute('data-pick'), first1 = $('#sp-' + key + '-sugs button'); if (first1) first1.click(); return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'm-text' && window.matchMedia('(min-width: 901px)').matches) { e.preventDefault(); var f = $('#f-msg'); if (f) f.requestSubmit(); }
   });
   var LIVE_VIEWS = ['dash', 'myjob', 'messages', 'wallet', 'work', 'proposals', 'contracts'];
