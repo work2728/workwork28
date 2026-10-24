@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>/* iPhone/iPad: stop zooming in when a text box is tapped (pinch-zoom still works) */(function(){var ios=/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);if(ios){var m=document.querySelector("meta[name=viewport]");m.setAttribute("content","width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover");}})();</script>
 <title>PadiHire · Freelance work and talent in Nigeria</title>
 <meta name="description" content="Hire Nigerian freelancers or find freelance work. Payments are held in escrow until the work is approved.">
 <meta name="theme-color" content="#5b21b6">
@@ -10,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/app.css?v=4">
 </head>
 <body>
 <header class="top" id="top"></header>
@@ -20,7 +21,7 @@
 <div class="modal" id="modal" hidden></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <noscript><div class="wrap scr"><p>PadiHire needs JavaScript turned on.</p></div></noscript>
-<script src="/common.js"></script>
-<script src="/app.js"></script>
+<script src="/common.js?v=4"></script>
+<script src="/app.js?v=4"></script>
 </body>
 </html>
