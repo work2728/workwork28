@@ -1,0 +1,880 @@
+/* PadiHire API. Runs as a Cloudflare Pages Function at /api/*.
+   Needs a D1 binding named DB. Optional environment variable ADMIN_EMAILS (comma separated) marks admins. */
+
+const CATS = {
+  design: 'Graphics & design', writing: 'Writing & translation', web: 'Web & app development',
+  video: 'Video & animation', social: 'Social media & marketing', admin: 'Admin & data entry'
+};
+const CAT_SHORT = { design: 'Design', writing: 'Writing', web: 'Web dev', video: 'Video', social: 'Social media', admin: 'Admin' };
+const LEVELS = ['Entry', 'Intermediate', 'Expert'];
+const BUDGETS = { u20: [0, 19999], '20-50': [20000, 50000], '50-150': [50001, 150000], '150p': [150001, 1e12] };
+const DAY = 86400;
+const LIVE = ['active', 'delivered', 'disputed'];
+
+class HttpError extends Error { constructor(status, message, extra) { super(message); this.status = status; this.extra = extra; } }
+const fail = (status, message, extra) => { throw new HttpError(status, message, extra); };
+const bad = (message) => fail(400, message);
+const now = () => Math.floor(Date.now() / 1000);
+const int = (v) => { const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10); return isNaN(n) ? 0 : n; };
+const str = (v, max) => String(v == null ? '' : v).replace(/\s+$/g, '').replace(/^\s+/g, '').slice(0, max || 200);
+const naira = (n) => '₦' + String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const isUnique = (e) => /UNIQUE constraint/i.test(String(e && (e.message || e)));
+const isCheck = (e) => /CHECK constraint/i.test(String(e && (e.message || e)));
+const display = (u) => (u.business || u.name);
+const json = (data, status, headers) => new Response(JSON.stringify(data), { status: status || 200, headers: Object.assign({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, headers || {}) });
+
+/* ---------- router ---------- */
+const ROUTES = [];
+function on(method, pattern, handler) { ROUTES.push([method, pattern.split('/').filter(Boolean), handler]); }
+function match(parts, pat) {
+  if (parts.length !== pat.length) return null;
+  const p = {};
+  for (let i = 0; i < pat.length; i++) {
+    if (pat[i][0] === ':') p[pat[i].slice(1)] = decodeURIComponent(parts[i]);
+    else if (pat[i] !== parts[i]) return null;
+  }
+  return p;
+}
+
+export async function onRequest(ctx) {
+  const { request, env } = ctx;
+  try {
+    if (!env.DB) fail(500, 'The database is not connected yet. Add a D1 binding named DB in Cloudflare Pages settings.');
+    const url = new URL(request.url);
+    let parts = ctx.params && ctx.params.path;
+    if (!Array.isArray(parts)) parts = parts ? [parts] : [];
+    const method = request.method;
+    let body = {};
+    if (method === 'POST') {
+      const ct = request.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) fail(415, 'Send JSON.');
+      body = await request.json().catch(() => ({})) || {};
+    }
+    const c = { req: request, env, db: env.DB, url, q: url.searchParams, body, user: null, set: null, cookies: [] };
+    c.user = await currentUser(c);
+    await autoRelease(c);
+    for (const [m, pat, h] of ROUTES) {
+      if (m !== method) continue;
+      const p = match(parts, pat);
+      if (p) {
+        const out = await h(c, p);
+        const res = out instanceof Response ? out : json(out);
+        c.cookies.forEach((ck) => res.headers.append('set-cookie', ck));
+        return res;
+      }
+    }
+    fail(404, 'Not found.');
+  } catch (e) {
+    if (e instanceof HttpError) return json(Object.assign({ error: e.message }, e.extra || {}), e.status);
+    console.error(e && e.stack || e);
+    return json({ error: 'Something went wrong. Please try again.' }, 500);
+  }
+}
+
+/* ---------- settings ---------- */
+async function settings(c) {
+  if (c.set) return c.set;
+  const rows = (await c.db.prepare('SELECT k, v FROM settings').all()).results || [];
+  const s = { client_fee_pct: 5, fre_fee_pct: 10, monthly_proposals: 20, auto_release_days: 5, bank_name: '', bank_acct: '', bank_holder: '', support_whatsapp: '' };
+  rows.forEach((r) => { s[r.k] = /_pct$|_proposals$|_days$/.test(r.k) ? int(r.v) : r.v; });
+  c.set = s;
+  return s;
+}
+
+/* ---------- auth ---------- */
+const hex = (b) => Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+const unhex = (h) => new Uint8Array((h.match(/../g) || []).map((x) => parseInt(x, 16)));
+async function sha256(text) { return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))); }
+async function hashPass(pw, saltHex) {
+  const salt = saltHex ? unhex(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100000 }, key, 256);
+  return 'pbkdf2$100000$' + hex(salt) + '$' + hex(new Uint8Array(bits));
+}
+async function checkPass(pw, stored) {
+  const parts = String(stored).split('$');
+  if (parts.length !== 4) return false;
+  const again = await hashPass(pw, parts[2]);
+  if (again.length !== stored.length) return false;
+  let diff = 0;
+  for (let i = 0; i < again.length; i++) diff |= again.charCodeAt(i) ^ stored.charCodeAt(i);
+  return diff === 0;
+}
+function cookieVal(req, name) {
+  const m = (req.headers.get('cookie') || '').match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
+  return m ? m[1] : '';
+}
+function isSecure(c) { return c.url.protocol === 'https:' || c.url.hostname === 'localhost' || c.url.hostname === '127.0.0.1'; }
+async function startSession(c, userId) {
+  const token = hex(crypto.getRandomValues(new Uint8Array(32)));
+  const exp = now() + 30 * DAY;
+  await c.db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').bind(await sha256(token), userId, exp).run();
+  c.cookies.push('sid=' + token + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + 30 * DAY + (isSecure(c) ? '; Secure' : ''));
+}
+async function currentUser(c) {
+  const token = cookieVal(c.req, 'sid');
+  if (!token || !/^[0-9a-f]{64}$/.test(token)) return null;
+  const u = await c.db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?').bind(await sha256(token), now()).first();
+  if (!u) return null;
+  const admins = String(c.env.ADMIN_EMAILS || '').toLowerCase().split(/[\s,;]+/).filter(Boolean);
+  u.is_admin = admins.indexOf(String(u.email).toLowerCase()) >= 0;
+  return u;
+}
+function need(c) {
+  if (!c.user) fail(401, 'Please log in.');
+  if (c.user.status !== 'active') fail(403, 'Your account is suspended. Please contact support.');
+  return c.user;
+}
+function needAdmin(c) { need(c); if (!c.user.is_admin) fail(403, 'Admins only.'); return c.user; }
+function normPhone(p) {
+  const s = String(p || '').replace(/[\s()-]/g, '');
+  if (!/^(\+?234|0)[789][01]\d{8}$/.test(s)) return '';
+  return '0' + s.replace(/^\+?234/, '').replace(/^0/, '');
+}
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function selfView(u) {
+  return {
+    id: u.id, name: u.name, email: u.email, phone: u.phone, city: u.city, role: u.role, title: u.title, cat: u.cat,
+    skills: parseList(u.skills), about: u.about, rate_from: u.rate_from, business: u.business, verified: !!u.verified,
+    rating: u.rating_count ? +(u.rating_sum / u.rating_count).toFixed(1) : 0, reviews: u.rating_count, jobs_done: u.jobs_done,
+    bank: { name: u.bank_name, acct: u.bank_acct, holder: u.bank_holder }, created_at: u.created_at
+  };
+}
+function parseList(v) { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function cleanSkills(v) {
+  const list = Array.isArray(v) ? v : String(v || '').split(',');
+  return list.map((s) => str(s, 30)).filter(Boolean).slice(0, 8);
+}
+
+on('POST', 'auth/signup', async (c) => {
+  const b = c.body, role = b.role === 'cli' ? 'cli' : b.role === 'fre' ? 'fre' : '';
+  const name = str(b.name, 60).replace(/\s+/g, ' '), email = str(b.email, 120).toLowerCase(), phone = normPhone(b.phone), pass = String(b.password || '');
+  const errors = {};
+  if (!role) errors.role = 'Choose client or freelancer.';
+  if (name.split(' ').length < 2) errors.name = 'Enter your first and last name.';
+  if (!EMAIL.test(email)) errors.email = 'Enter a valid email address.';
+  if (!phone) errors.phone = 'Enter a Nigerian phone number, like 0803 123 4567.';
+  if (pass.length < 8) errors.password = 'Use at least 8 characters.';
+  if (role === 'fre' && !CATS[b.cat]) errors.cat = 'Choose the kind of work you do.';
+  if (Object.keys(errors).length) fail(400, 'Please fix the highlighted fields.', { fields: errors });
+  const cat = role === 'fre' ? b.cat : '';
+  const title = role === 'fre' ? (str(b.title, 80) || CATS[cat]) : '';
+  const skills = JSON.stringify(role === 'fre' ? [CAT_SHORT[cat]] : []);
+  try {
+    const r = await c.db.prepare('INSERT INTO users (name, email, phone, pass_hash, city, role, title, cat, skills, business, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(name, email, phone, await hashPass(pass), str(b.city, 40), role, title, cat, skills, role === 'cli' ? str(b.business, 80) : '', now()).run();
+    await startSession(c, r.meta.last_row_id);
+  } catch (e) {
+    if (isUnique(e)) {
+      const dupe = await c.db.prepare('SELECT email FROM users WHERE email = ?').bind(email).first();
+      fail(409, dupe ? 'An account with this email already exists. Log in instead.' : 'An account with this phone number already exists. Log in instead.', { fields: dupe ? { email: 'Already registered.' } : { phone: 'Already registered.' } });
+    }
+    throw e;
+  }
+  return { ok: true };
+});
+
+on('POST', 'auth/login', async (c) => {
+  const login = str(c.body.login, 120), pass = String(c.body.password || '');
+  const byEmail = login.indexOf('@') >= 0;
+  const key = byEmail ? login.toLowerCase() : normPhone(login);
+  const u = key ? await c.db.prepare('SELECT * FROM users WHERE ' + (byEmail ? 'email' : 'phone') + ' = ?').bind(key).first() : null;
+  if (!u || !(await checkPass(pass, u.pass_hash))) fail(401, 'Wrong email, phone number or password.');
+  if (u.status !== 'active') fail(403, 'Your account is suspended. Please contact support.');
+  await startSession(c, u.id);
+  return { ok: true };
+});
+
+on('POST', 'auth/logout', async (c) => {
+  const token = cookieVal(c.req, 'sid');
+  if (token) await c.db.prepare('DELETE FROM sessions WHERE token = ?').bind(await sha256(token)).run();
+  c.cookies.push('sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' + (isSecure(c) ? '; Secure' : ''));
+  return { ok: true };
+});
+
+on('POST', 'me/password', async (c) => {
+  const u = need(c);
+  if (!(await checkPass(String(c.body.current || ''), u.pass_hash))) fail(400, 'Your current password is wrong.', { fields: { current: 'Wrong password.' } });
+  const pw = String(c.body.password || '');
+  if (pw.length < 8) fail(400, 'Use at least 8 characters.', { fields: { password: 'Use at least 8 characters.' } });
+  await c.db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').bind(await hashPass(pw), u.id).run();
+  return { ok: true };
+});
+
+/* ---------- me ---------- */
+async function walletNums(c, uid) {
+  const [a, b] = await c.db.batch([
+    c.db.prepare("SELECT COALESCE(SUM(amount), 0) AS n FROM contracts WHERE client_id = ? AND stage IN ('active','delivered','disputed')").bind(uid),
+    c.db.prepare("SELECT COALESCE(SUM(amount), 0) AS n FROM contracts WHERE fre_id = ? AND stage IN ('active','delivered','disputed')").bind(uid)
+  ]);
+  return { escrow_out: a.results[0].n, escrow_in: b.results[0].n };
+}
+on('GET', 'me', async (c) => {
+  const s = await settings(c);
+  if (!c.user) return { user: null, support_whatsapp: s.support_whatsapp };
+  const u = c.user, cli = u.role === 'cli';
+  const [unread, waiting, active, other] = await c.db.batch([
+    c.db.prepare('SELECT COALESCE(SUM(' + (cli ? 'client_unread' : 'fre_unread') + '), 0) AS n FROM threads WHERE ' + (cli ? 'client_id' : 'fre_id') + ' = ?').bind(u.id),
+    c.db.prepare("SELECT COUNT(*) AS n FROM contracts WHERE client_id = ? AND stage = 'delivered'").bind(u.id),
+    c.db.prepare("SELECT COUNT(*) AS n FROM contracts WHERE fre_id = ? AND stage = 'active'").bind(u.id),
+    c.db.prepare('SELECT COALESCE(SUM(' + (cli ? 'fre_unread' : 'client_unread') + '), 0) AS n FROM threads WHERE ' + (cli ? 'fre_id' : 'client_id') + ' = ?').bind(u.id)
+  ]);
+  const w = await walletNums(c, u.id);
+  return {
+    user: selfView(u), is_admin: !!u.is_admin, support_whatsapp: s.support_whatsapp,
+    wallet: { avail: u.avail, escrow_out: w.escrow_out, escrow_in: w.escrow_in },
+    unread: unread.results[0].n, unread_other: other.results[0].n, waiting: waiting.results[0].n, active: active.results[0].n,
+    fee: cli ? { client_fee_pct: s.client_fee_pct } : { fre_fee_pct: s.fre_fee_pct, monthly_proposals: s.monthly_proposals }
+  };
+});
+on('POST', 'me/role', async (c) => {
+  const u = need(c), role = c.body.role === 'cli' ? 'cli' : 'fre';
+  await c.db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u.id).run();
+  return { ok: true, role };
+});
+on('POST', 'me/profile', async (c) => {
+  const u = need(c), b = c.body;
+  const name = str(b.name, 60).replace(/\s+/g, ' ');
+  if (name.split(' ').length < 2) fail(400, 'Enter your first and last name.', { fields: { name: 'Enter your first and last name.' } });
+  const cat = b.cat === '' || b.cat == null ? u.cat : (CATS[b.cat] ? b.cat : u.cat);
+  await c.db.prepare('UPDATE users SET name = ?, city = ?, title = ?, cat = ?, skills = ?, about = ?, rate_from = ?, business = ? WHERE id = ?')
+    .bind(name, str(b.city, 40), str(b.title, 80), cat, JSON.stringify(cleanSkills(b.skills)), str(b.about, 1200), Math.max(0, int(b.rate_from)), str(b.business, 80), u.id).run();
+  return { ok: true };
+});
+on('POST', 'me/bank', async (c) => {
+  const u = need(c), b = c.body;
+  const name = str(b.bank_name, 60), acct = String(b.bank_acct || '').replace(/\D/g, ''), holder = str(b.bank_holder, 80);
+  const fields = {};
+  if (!name) fields.bank_name = 'Enter your bank.';
+  if (!/^\d{10}$/.test(acct)) fields.bank_acct = 'Enter your 10-digit account number.';
+  if (holder.split(/\s+/).length < 2) fields.bank_holder = 'Enter the account name.';
+  if (Object.keys(fields).length) fail(400, 'Please fix the highlighted fields.', { fields });
+  await c.db.prepare('UPDATE users SET bank_name = ?, bank_acct = ?, bank_holder = ? WHERE id = ?').bind(name, acct, holder, u.id).run();
+  return { ok: true };
+});
+
+/* ---------- jobs ---------- */
+function jobView(j, extra) {
+  return Object.assign({
+    id: j.id, title: j.title, cat: j.cat, level: j.level, budget: j.budget, days: j.days, city: j.city, remote: !!j.remote,
+    skills: parseList(j.skills), descr: j.descr, props: j.props, status: j.status, created_at: j.created_at,
+    client: { id: j.client_id, name: j.business || j.client_name, person: j.client_name, verified: !!j.verified, since: j.client_since }
+  }, extra || {});
+}
+const JOB_SELECT = 'SELECT j.*, u.name AS client_name, u.business, u.verified, u.created_at AS client_since FROM jobs j JOIN users u ON u.id = j.client_id';
+
+on('GET', 'jobs', async (c) => {
+  const q = c.q, where = ["j.status = 'open'", "u.status = 'active'"], args = [];
+  const words = str(q.get('q'), 80).toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5);
+  words.forEach((w) => { const like = '%' + w.replace(/[%_]/g, '') + '%'; where.push('(LOWER(j.title) LIKE ? OR LOWER(j.descr) LIKE ? OR LOWER(j.skills) LIKE ? OR LOWER(u.business) LIKE ? OR LOWER(u.name) LIKE ?)'); args.push(like, like, like, like, like); });
+  if (CATS[q.get('cat')]) { where.push('j.cat = ?'); args.push(q.get('cat')); }
+  const city = str(q.get('city'), 40);
+  if (city === 'Remote') where.push('j.remote = 1'); else if (city) { where.push('j.city = ?'); args.push(city); }
+  const band = BUDGETS[q.get('budget')];
+  if (band) { where.push('j.budget BETWEEN ? AND ?'); args.push(band[0], band[1]); }
+  if (LEVELS.indexOf(q.get('level')) >= 0) { where.push('j.level = ?'); args.push(q.get('level')); }
+  if (q.get('verified') === '1') where.push('u.verified = 1');
+  if (q.get('remote') === '1') where.push('j.remote = 1');
+  if (q.get('today') === '1') { where.push('j.created_at > ?'); args.push(now() - DAY); }
+  const sorts = { new: 'j.created_at DESC', high: 'j.budget DESC, j.created_at DESC', low: 'j.budget ASC, j.created_at DESC', few: 'j.props ASC, j.created_at DESC' };
+  const limit = Math.min(60, Math.max(1, int(q.get('limit')) || 40));
+  const rows = (await c.db.prepare(JOB_SELECT + ' WHERE ' + where.join(' AND ') + ' ORDER BY ' + (sorts[q.get('sort')] || sorts.new) + ' LIMIT ' + limit).bind(...args).all()).results;
+  return { jobs: await withFlags(c, rows.map((j) => jobView(j))) };
+});
+async function withFlags(c, jobs) {
+  if (!c.user || !jobs.length) return jobs;
+  const ids = jobs.map((j) => j.id), marks = ids.map(() => '?').join(',');
+  const [saved, applied] = await c.db.batch([
+    c.db.prepare('SELECT job_id FROM saved WHERE user_id = ? AND job_id IN (' + marks + ')').bind(c.user.id, ...ids),
+    c.db.prepare('SELECT job_id FROM proposals WHERE fre_id = ? AND job_id IN (' + marks + ')').bind(c.user.id, ...ids)
+  ]);
+  const s = new Set(saved.results.map((r) => r.job_id)), a = new Set(applied.results.map((r) => r.job_id));
+  jobs.forEach((j) => { j.saved = s.has(j.id); j.applied = a.has(j.id); j.mine = j.client.id === c.user.id; });
+  return jobs;
+}
+on('GET', 'jobs/:id', async (c, p) => {
+  const j = await c.db.prepare(JOB_SELECT + ' WHERE j.id = ?').bind(int(p.id)).first();
+  const mine = c.user && j && j.client_id === c.user.id;
+  if (!j || (j.status === 'removed' && !mine && !(c.user && c.user.is_admin))) fail(404, 'This job is no longer available.');
+  const [posted, hires, talks] = await c.db.batch([
+    c.db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE client_id = ? AND status != 'removed'").bind(j.client_id),
+    c.db.prepare('SELECT COUNT(*) AS n FROM contracts WHERE client_id = ?').bind(j.client_id),
+    c.db.prepare('SELECT COUNT(*) AS n FROM threads WHERE job_id = ?').bind(j.id)
+  ]);
+  const view = jobView(j, { interviewing: talks.results[0].n });
+  view.client.posted = posted.results[0].n; view.client.hires = hires.results[0].n; view.client.city = j.city;
+  const [out] = await withFlags(c, [view]);
+  if (c.user && !mine) {
+    const s = await settings(c);
+    if (c.user.role !== 'cli') out.fre_fee_pct = s.fre_fee_pct;
+  }
+  if (mine) out.client_fee_pct = (await settings(c)).client_fee_pct;
+  const similar = (await c.db.prepare(JOB_SELECT + " WHERE j.status = 'open' AND j.cat = ? AND j.id != ? AND u.status = 'active' ORDER BY j.created_at DESC LIMIT 3").bind(j.cat, j.id).all()).results;
+  out.similar = await withFlags(c, similar.map((x) => jobView(x)));
+  return { job: out };
+});
+on('POST', 'jobs', async (c) => {
+  const u = need(c), b = c.body, fields = {};
+  const title = str(b.title, 120), cat = b.cat, budget = int(b.budget), days = Math.max(1, Math.min(365, int(b.days) || 3)), descr = str(b.descr, 4000);
+  const level = LEVELS.indexOf(b.level) >= 0 ? b.level : 'Intermediate';
+  const remote = b.city === 'Remote' || !b.city;
+  if (title.length < 8) fields.title = 'Add a short title, like “Design a logo for my bakery”.';
+  if (!CATS[cat]) fields.cat = 'Choose a category.';
+  if (budget < 2000) fields.budget = 'Enter a budget of at least ₦2,000.';
+  if (budget > 50000000) fields.budget = 'That budget is too large.';
+  if (descr.length < 20) fields.descr = 'Describe the job in at least 20 characters.';
+  if (Object.keys(fields).length) fail(400, 'Please fix the highlighted fields.', { fields });
+  const recent = await c.db.prepare('SELECT COUNT(*) AS n FROM jobs WHERE client_id = ? AND created_at > ?').bind(u.id, now() - DAY).first();
+  if (recent.n >= 10) fail(429, 'You can post up to 10 jobs a day.');
+  const skills = cleanSkills(b.skills);
+  const r = await c.db.prepare('INSERT INTO jobs (client_id, title, cat, level, budget, days, city, remote, skills, descr, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(u.id, title, cat, level, budget, days, remote ? (u.city || '') : str(b.city, 40), remote ? 1 : 0, JSON.stringify(skills.length ? skills : [CAT_SHORT[cat]]), descr, now()).run();
+  if (u.role !== 'cli') await c.db.prepare("UPDATE users SET role = 'cli' WHERE id = ?").bind(u.id).run();
+  return { ok: true, id: r.meta.last_row_id };
+});
+on('POST', 'jobs/:id/report', async (c, p) => {
+  const u = need(c), reason = str(c.body.reason, 200);
+  if (!reason) bad('Choose a reason.');
+  const dupe = await c.db.prepare('SELECT id FROM reports WHERE job_id = ? AND user_id = ?').bind(int(p.id), u.id).first();
+  if (!dupe) await c.db.prepare('INSERT INTO reports (job_id, user_id, reason, created_at) VALUES (?, ?, ?, ?)').bind(int(p.id), u.id, reason, now()).run();
+  return { ok: true };
+});
+
+/* ---------- saved ---------- */
+on('POST', 'saved/:id', async (c, p) => {
+  const u = need(c), id = int(p.id);
+  const had = await c.db.prepare('SELECT job_id FROM saved WHERE user_id = ? AND job_id = ?').bind(u.id, id).first();
+  if (had) await c.db.prepare('DELETE FROM saved WHERE user_id = ? AND job_id = ?').bind(u.id, id).run();
+  else await c.db.prepare('INSERT OR IGNORE INTO saved (user_id, job_id, created_at) VALUES (?, ?, ?)').bind(u.id, id, now()).run();
+  return { saved: !had };
+});
+on('GET', 'saved', async (c) => {
+  const u = need(c);
+  const rows = (await c.db.prepare(JOB_SELECT + ' JOIN saved s ON s.job_id = j.id WHERE s.user_id = ? AND j.status = \'open\' ORDER BY s.created_at DESC').bind(u.id).all()).results;
+  return { jobs: await withFlags(c, rows.map((j) => jobView(j))) };
+});
+
+/* ---------- proposals (freelancer) ---------- */
+on('POST', 'jobs/:id/apply', async (c, p) => {
+  const u = need(c), b = c.body, s = await settings(c);
+  if (!u.cat) fail(400, 'Set up your freelancer profile before you apply.');
+  const j = await c.db.prepare('SELECT * FROM jobs WHERE id = ?').bind(int(p.id)).first();
+  if (!j || j.status !== 'open') fail(400, 'This job is no longer taking proposals.');
+  if (j.client_id === u.id) fail(400, 'You cannot apply to your own job.');
+  const price = int(b.price), days = int(b.days), note = str(b.note, 3000), fields = {};
+  if (price < 1000) fields.price = 'Enter a bid of at least ₦1,000.';
+  if (price > 50000000) fields.price = 'That bid is too large.';
+  if (days < 1 || days > 365) fields.days = 'Enter how many days you need.';
+  if (note.length < 20) fields.note = 'Write at least 20 characters so the client knows why you are a good fit.';
+  if (Object.keys(fields).length) fail(400, 'Please fix the highlighted fields.', { fields });
+  const d = new Date(), monthStart = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000);
+  const used = await c.db.prepare('SELECT COUNT(*) AS n FROM proposals WHERE fre_id = ? AND created_at >= ?').bind(u.id, monthStart).first();
+  if (used.n >= s.monthly_proposals) fail(429, 'You have used all ' + s.monthly_proposals + ' proposals for this month. More become available on the 1st.');
+  try {
+    await c.db.batch([
+      c.db.prepare('INSERT INTO proposals (job_id, fre_id, price, days, note, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(j.id, u.id, price, days, note, now()),
+      c.db.prepare('UPDATE jobs SET props = props + 1 WHERE id = ?').bind(j.id)
+    ]);
+  } catch (e) { if (isUnique(e)) fail(409, 'You already sent a proposal for this job.'); throw e; }
+  return { ok: true, left: s.monthly_proposals - used.n - 1 };
+});
+on('GET', 'proposals', async (c) => {
+  const u = need(c), s = await settings(c);
+  const rows = (await c.db.prepare('SELECT p.*, j.title, j.status AS job_status, u.name AS client_name, u.business FROM proposals p JOIN jobs j ON j.id = p.job_id JOIN users u ON u.id = j.client_id WHERE p.fre_id = ? ORDER BY p.id DESC LIMIT 200').bind(u.id).all()).results;
+  const d = new Date(), monthStart = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000);
+  const used = rows.filter((r) => r.created_at >= monthStart).length;
+  return {
+    left: Math.max(0, s.monthly_proposals - used), monthly: s.monthly_proposals, fre_fee_pct: s.fre_fee_pct,
+    proposals: rows.map((r) => ({ id: r.id, job_id: r.job_id, title: r.title, client: r.business || r.client_name, price: r.price, days: r.days, status: r.status === 'sent' && r.job_status !== 'open' ? 'lost' : r.status, created_at: r.created_at }))
+  };
+});
+
+/* ---------- client jobs ---------- */
+on('GET', 'myjobs', async (c) => {
+  const u = need(c);
+  const rows = (await c.db.prepare("SELECT j.id, j.title, j.budget, j.days, j.status, j.props, j.created_at, c.id AS contract_id, c.stage, c.amount, c.thread_id, c.rated, f.name AS fre_name, f.id AS fre_id FROM jobs j LEFT JOIN contracts c ON c.job_id = j.id LEFT JOIN users f ON f.id = c.fre_id WHERE j.client_id = ? AND j.status != 'removed' ORDER BY j.id DESC LIMIT 200").bind(u.id).all()).results;
+  return { jobs: rows };
+});
+on('GET', 'myjobs/:id', async (c, p) => {
+  const u = need(c), s = await settings(c);
+  const j = await c.db.prepare('SELECT * FROM jobs WHERE id = ? AND client_id = ?').bind(int(p.id), u.id).first();
+  if (!j) fail(404, 'Job not found.');
+  const props = (await c.db.prepare('SELECT p.*, f.name, f.title AS fre_title, f.city, f.rating_sum, f.rating_count, f.jobs_done, t.id AS thread_id FROM proposals p JOIN users f ON f.id = p.fre_id LEFT JOIN threads t ON t.job_id = p.job_id AND t.fre_id = p.fre_id AND t.client_id = ? WHERE p.job_id = ? ORDER BY p.id DESC').bind(u.id, j.id).all()).results;
+  const contract = await c.db.prepare('SELECT * FROM contracts WHERE job_id = ?').bind(j.id).first();
+  return {
+    job: Object.assign(jobView(Object.assign({}, j, { client_name: u.name, business: u.business, verified: u.verified, client_since: u.created_at })), { contract_id: contract ? contract.id : null, thread_id: contract ? contract.thread_id : null }),
+    client_fee_pct: s.client_fee_pct, avail: u.avail,
+    proposals: props.map((r) => ({ id: r.id, fre_id: r.fre_id, name: r.name, title: r.fre_title, city: r.city, rating: r.rating_count ? +(r.rating_sum / r.rating_count).toFixed(1) : 0, reviews: r.rating_count, jobs_done: r.jobs_done, price: r.price, days: r.days, note: r.note, status: r.status, created_at: r.created_at, thread_id: r.thread_id }))
+  };
+});
+on('POST', 'myjobs/:id/close', async (c, p) => {
+  const u = need(c), id = int(p.id);
+  const r = await c.db.prepare("UPDATE jobs SET status = 'closed' WHERE id = ? AND client_id = ? AND status = 'open'").bind(id, u.id).run();
+  if (!r.meta.changes) fail(400, 'Only open jobs can be closed.');
+  await c.db.prepare("UPDATE proposals SET status = 'lost' WHERE job_id = ? AND status = 'sent'").bind(id).run();
+  return { ok: true };
+});
+
+/* ---------- freelancers ---------- */
+function proView(r) {
+  return { id: r.id, name: r.name, title: r.title, cat: r.cat, city: r.city, rating: r.rating_count ? +(r.rating_sum / r.rating_count).toFixed(1) : 0, reviews: r.rating_count, jobs_done: r.jobs_done, rate_from: r.rate_from, skills: parseList(r.skills), about: r.about, since: r.created_at };
+}
+on('GET', 'freelancers', async (c) => {
+  const where = ["cat != ''", "status = 'active'"], args = [];
+  const words = str(c.q.get('q'), 80).toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5);
+  words.forEach((w) => { const like = '%' + w.replace(/[%_]/g, '') + '%'; where.push('(LOWER(name) LIKE ? OR LOWER(title) LIKE ? OR LOWER(skills) LIKE ? OR LOWER(city) LIKE ?)'); args.push(like, like, like, like); });
+  if (CATS[c.q.get('cat')]) { where.push('cat = ?'); args.push(c.q.get('cat')); }
+  const limit = Math.min(60, Math.max(1, int(c.q.get('limit')) || 40));
+  const rows = (await c.db.prepare('SELECT * FROM users WHERE ' + where.join(' AND ') + ' ORDER BY rating_count DESC, jobs_done DESC, id DESC LIMIT ' + limit).bind(...args).all()).results;
+  return { freelancers: rows.map(proView) };
+});
+on('GET', 'freelancers/:id', async (c, p) => {
+  const r = await c.db.prepare("SELECT * FROM users WHERE id = ? AND cat != '' AND status = 'active'").bind(int(p.id)).first();
+  if (!r) fail(404, 'Freelancer not found.');
+  const reviews = (await c.db.prepare('SELECT r.stars, r.note, r.created_at, u.name, u.business, c.title FROM reviews r JOIN users u ON u.id = r.client_id JOIN contracts c ON c.id = r.contract_id WHERE r.fre_id = ? ORDER BY r.id DESC LIMIT 10').bind(r.id).all()).results;
+  return { freelancer: proView(r), reviews: reviews.map((x) => ({ stars: x.stars, note: x.note, created_at: x.created_at, client: x.business || x.name, title: x.title })) };
+});
+
+/* ---------- chat ---------- */
+const CONTACT = [
+  /(?:\+?234[\s-]?|\b0)[789][01](?:[\s-]?\d){8}\b/g,
+  /[\w.+-]+@[\w-]+\.[\w.-]+/g,
+  /(?:https?:\/\/)?(?:wa\.me|chat\.whatsapp\.com|api\.whatsapp\.com|t\.me|telegram\.me)\/?\S*/gi
+];
+function maskContacts(text) { let t = text; CONTACT.forEach((re) => { t = t.replace(re, '[contact hidden until hired]'); }); return t; }
+async function threadFor(c, id) {
+  const t = await c.db.prepare('SELECT t.*, j.title AS job_title, j.status AS job_status FROM threads t JOIN jobs j ON j.id = t.job_id WHERE t.id = ?').bind(int(id)).first();
+  if (!t) fail(404, 'Conversation not found.');
+  const u = c.user, side = t.client_id === u.id ? 'client' : t.fre_id === u.id ? 'fre' : '';
+  if (!side && !u.is_admin) fail(404, 'Conversation not found.');
+  t.side = side;
+  return t;
+}
+async function sysMessage(c, t, text, toClient, toFre) {
+  return [
+    c.db.prepare('INSERT INTO messages (thread_id, sender_id, body, created_at) VALUES (?, 0, ?, ?)').bind(t.id, text, now()),
+    c.db.prepare('UPDATE threads SET last_at = ?, last_text = ?, last_sender = 0, client_unread = client_unread + ?, fre_unread = fre_unread + ? WHERE id = ?').bind(now(), text.slice(0, 140), toClient ? 1 : 0, toFre ? 1 : 0, t.id)
+  ];
+}
+on('GET', 'threads', async (c) => {
+  const u = need(c), cli = u.role === 'cli';
+  const rows = (await c.db.prepare('SELECT t.*, j.title AS job_title, o.name AS other_name, o.business AS other_business, k.stage FROM threads t JOIN jobs j ON j.id = t.job_id JOIN users o ON o.id = ' + (cli ? 't.fre_id' : 't.client_id') + ' LEFT JOIN contracts k ON k.thread_id = t.id WHERE ' + (cli ? 't.client_id' : 't.fre_id') + ' = ? ORDER BY t.last_at DESC LIMIT 200').bind(u.id).all()).results;
+  return {
+    threads: rows.map((t) => ({ id: t.id, job_id: t.job_id, job: t.job_title, other: cli ? t.other_name : (t.other_business || t.other_name), last_text: t.last_text, last_at: t.last_at, mine: t.last_sender === u.id, unread: cli ? t.client_unread : t.fre_unread, stage: t.stage || null }))
+  };
+});
+on('POST', 'threads', async (c) => {
+  const u = need(c), jobId = int(c.body.job_id), freId = int(c.body.fre_id);
+  const j = await c.db.prepare('SELECT * FROM jobs WHERE id = ? AND client_id = ?').bind(jobId, u.id).first();
+  if (!j) fail(404, 'Job not found.');
+  const f = await c.db.prepare("SELECT id FROM users WHERE id = ? AND cat != ''").bind(freId).first();
+  if (!f || freId === u.id) fail(404, 'Freelancer not found.');
+  await c.db.prepare('INSERT OR IGNORE INTO threads (job_id, client_id, fre_id, last_at) VALUES (?, ?, ?, ?)').bind(jobId, u.id, freId, now()).run();
+  const t = await c.db.prepare('SELECT id FROM threads WHERE job_id = ? AND client_id = ? AND fre_id = ?').bind(jobId, u.id, freId).first();
+  if (c.body.invite) {
+    const text = 'Hi, I’d like you to look at my job “' + j.title + '” and send a proposal if it suits you.';
+    await c.db.batch([
+      c.db.prepare('INSERT INTO messages (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)').bind(t.id, u.id, text, now()),
+      c.db.prepare('UPDATE threads SET last_at = ?, last_text = ?, last_sender = ?, fre_unread = fre_unread + 1 WHERE id = ?').bind(now(), text.slice(0, 140), u.id, t.id)
+    ]);
+  }
+  return { id: t.id };
+});
+on('GET', 'threads/:id', async (c, p) => {
+  need(c);
+  const t = await threadFor(c, p.id), after = int(c.q.get('after'));
+  const msgs = (await c.db.prepare('SELECT id, sender_id, body, created_at FROM messages WHERE thread_id = ? AND id > ? ORDER BY id ASC LIMIT 300').bind(t.id, after).all()).results;
+  if (t.side === 'client' && t.client_unread) await c.db.prepare('UPDATE threads SET client_unread = 0 WHERE id = ?').bind(t.id).run();
+  if (t.side === 'fre' && t.fre_unread) await c.db.prepare('UPDATE threads SET fre_unread = 0 WHERE id = ?').bind(t.id).run();
+  const [cl, fr, k] = await c.db.batch([
+    c.db.prepare('SELECT id, name, business FROM users WHERE id = ?').bind(t.client_id),
+    c.db.prepare('SELECT id, name, title FROM users WHERE id = ?').bind(t.fre_id),
+    c.db.prepare('SELECT * FROM contracts WHERE thread_id = ?').bind(t.id)
+  ]);
+  const client = cl.results[0], fre = fr.results[0], contract = k.results[0];
+  const s = await settings(c);
+  let kv = null;
+  if (contract) {
+    kv = { id: contract.id, amount: contract.amount, days: contract.days, due_at: contract.due_at, stage: contract.stage, delivered_at: contract.delivered_at, closed_at: contract.closed_at, rated: !!contract.rated, dispute_by: contract.dispute_by, auto_days: s.auto_release_days, title: contract.title };
+    if (t.side === 'fre') { kv.fre_fee = contract.fre_fee || Math.round(contract.amount * contract.fre_fee_pct / 100); kv.fre_fee_pct = contract.fre_fee_pct; }
+    if (t.side === 'client') kv.client_fee = contract.client_fee;
+  }
+  return {
+    thread: { id: t.id, job_id: t.job_id, job: t.job_title, job_status: t.job_status, side: t.side, client: { id: client.id, name: client.business || client.name, person: client.name }, fre: { id: fre.id, name: fre.name, title: fre.title }, contract: kv },
+    messages: msgs.map((m) => ({ id: m.id, me: m.sender_id === c.user.id, system: m.sender_id === 0, from: m.sender_id === client.id ? 'client' : m.sender_id === fre.id ? 'fre' : 'system', body: m.body, created_at: m.created_at }))
+  };
+});
+on('POST', 'threads/:id/messages', async (c, p) => {
+  const u = need(c), t = await threadFor(c, p.id);
+  if (!t.side) fail(403, 'Admins can read but not post here.');
+  let body = str(c.body.body, 2000);
+  if (!body) bad('Write a message.');
+  const contract = await c.db.prepare('SELECT id FROM contracts WHERE thread_id = ?').bind(t.id).first();
+  let masked = false;
+  if (!contract) { const m = maskContacts(body); masked = m !== body; body = m; }
+  const toClient = t.side === 'fre' ? 1 : 0;
+  const r = await c.db.batch([
+    c.db.prepare('INSERT INTO messages (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)').bind(t.id, u.id, body, now()),
+    c.db.prepare('UPDATE threads SET last_at = ?, last_text = ?, last_sender = ?, client_unread = client_unread + ?, fre_unread = fre_unread + ? WHERE id = ?').bind(now(), body.slice(0, 140), u.id, toClient, 1 - toClient, t.id)
+  ]);
+  return { ok: true, id: r[0].meta.last_row_id, masked };
+});
+
+/* ---------- hire + contracts ---------- */
+on('POST', 'hire', async (c) => {
+  const u = need(c), s = await settings(c);
+  const pr = await c.db.prepare('SELECT p.*, j.client_id, j.title, j.status AS job_status FROM proposals p JOIN jobs j ON j.id = p.job_id WHERE p.id = ?').bind(int(c.body.proposal_id)).first();
+  if (!pr || pr.client_id !== u.id) fail(404, 'Proposal not found.');
+  if (pr.job_status !== 'open') fail(400, 'You already hired for this job, or it is closed.');
+  const f = await c.db.prepare('SELECT id, name, status FROM users WHERE id = ?').bind(pr.fre_id).first();
+  if (!f || f.status !== 'active') fail(400, 'This freelancer can’t be hired right now.');
+  const fee = Math.round(pr.price * s.client_fee_pct / 100), total = pr.price + fee;
+  if (u.avail < total) fail(402, 'Add ' + naira(total - u.avail) + ' to your wallet to hire ' + f.name.split(' ')[0] + '.', { need: total - u.avail, total });
+  await c.db.prepare('INSERT OR IGNORE INTO threads (job_id, client_id, fre_id, last_at) VALUES (?, ?, ?, ?)').bind(pr.job_id, u.id, pr.fre_id, now()).run();
+  const t = await c.db.prepare('SELECT * FROM threads WHERE job_id = ? AND client_id = ? AND fre_id = ?').bind(pr.job_id, u.id, pr.fre_id).first();
+  const ts = now(), first = f.name.split(' ')[0];
+  const text = display(u) + ' hired ' + f.name + '. ' + naira(pr.price) + ' is held in escrow. ' + first + ', you can start now and deliver in this chat.';
+  const stmts = [
+    c.db.prepare('UPDATE users SET avail = avail - ? WHERE id = ?').bind(total, u.id),
+    c.db.prepare('INSERT INTO contracts (job_id, client_id, fre_id, thread_id, title, amount, client_fee, fre_fee_pct, days, due_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(pr.job_id, u.id, pr.fre_id, t.id, pr.title, pr.price, fee, s.fre_fee_pct, pr.days, ts + pr.days * DAY, ts),
+    c.db.prepare("UPDATE jobs SET status = 'hired' WHERE id = ?").bind(pr.job_id),
+    c.db.prepare("UPDATE proposals SET status = CASE WHEN id = ? THEN 'hired' ELSE 'lost' END WHERE job_id = ?").bind(pr.id, pr.job_id),
+    c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(u.id, 'escrow', 'Escrow for “' + pr.title + '”', -pr.price, 'escrow:' + pr.job_id, ts)
+  ];
+  if (fee) stmts.push(c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(u.id, 'fee', 'Service fee · ' + pr.title, -fee, 'fee:' + pr.job_id, ts));
+  stmts.push(...(await sysMessage(c, t, text, 0, 1)));
+  try { await c.db.batch(stmts); } catch (e) {
+    if (isCheck(e)) fail(402, 'Your wallet balance is too low for this hire.', { need: total - u.avail, total });
+    if (isUnique(e)) fail(409, 'You already hired someone for this job.');
+    throw e;
+  }
+  const k = await c.db.prepare('SELECT id FROM contracts WHERE job_id = ?').bind(pr.job_id).first();
+  return { ok: true, contract_id: k.id, thread_id: t.id };
+});
+async function contractFor(c, id) {
+  const k = await c.db.prepare('SELECT * FROM contracts WHERE id = ?').bind(int(id)).first();
+  if (!k) fail(404, 'Contract not found.');
+  return k;
+}
+async function release(c, k, byAdmin) {
+  const fee = Math.round(k.amount * k.fre_fee_pct / 100), net = k.amount - fee, ts = now();
+  const [f, cl] = await Promise.all([
+    c.db.prepare('SELECT name FROM users WHERE id = ?').bind(k.fre_id).first(),
+    c.db.prepare('SELECT name, business FROM users WHERE id = ?').bind(k.client_id).first()
+  ]);
+  const t = { id: k.thread_id };
+  const text = byAdmin === 'auto' ? 'The client didn’t respond within the review period, so ' + naira(k.amount) + ' was released to ' + f.name + '.'
+    : byAdmin ? 'PadiHire reviewed this contract and released ' + naira(k.amount) + ' to ' + f.name + '.'
+    : display(cl) + ' approved the work. ' + naira(k.amount) + ' was released to ' + f.name + '.';
+  const stmts = [
+    c.db.prepare("UPDATE contracts SET stage = 'paid', closed_at = ?, fre_fee = ? WHERE id = ? AND stage IN ('active','delivered','disputed')").bind(ts, fee, k.id),
+    c.db.prepare('UPDATE users SET avail = avail + ?, jobs_done = jobs_done + 1 WHERE id = ?').bind(net, k.fre_id),
+    c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(k.fre_id, 'earning', 'Payment for “' + k.title + '”', net, 'release:' + k.id, ts),
+    c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, info, ref, created_at) VALUES (?, ?, ?, 0, ?, ?, ?)').bind(k.client_id, 'release', 'Released to ' + f.name + ' · ' + k.title, k.amount, 'release-c:' + k.id, ts)
+  ].concat(await sysMessage(c, t, text, 1, 1));
+  try { await c.db.batch(stmts); } catch (e) { if (isUnique(e)) fail(409, 'This payment was already released.'); throw e; }
+}
+let lastAuto = 0;
+async function autoRelease(c) {
+  if (Date.now() - lastAuto < 60000) return;
+  lastAuto = Date.now();
+  try {
+    const s = await settings(c);
+    const due = (await c.db.prepare("SELECT * FROM contracts WHERE stage = 'delivered' AND delivered_at < ? LIMIT 10").bind(now() - s.auto_release_days * DAY).all()).results;
+    for (const k of due) { try { await release(c, k, 'auto'); } catch (e) { /* already handled */ } }
+  } catch (e) { console.error('auto release', e); }
+}
+on('GET', 'contracts', async (c) => {
+  const u = need(c);
+  const rows = (await c.db.prepare('SELECT k.id, k.title, k.amount, k.stage, k.due_at, k.thread_id, k.fre_fee_pct, k.fre_fee, k.closed_at, u.name AS client_name, u.business FROM contracts k JOIN users u ON u.id = k.client_id WHERE k.fre_id = ? ORDER BY k.id DESC LIMIT 200').bind(u.id).all()).results;
+  return { contracts: rows.map((k) => ({ id: k.id, title: k.title, amount: k.amount, net: k.amount - (k.fre_fee || Math.round(k.amount * k.fre_fee_pct / 100)), stage: k.stage, due_at: k.due_at, closed_at: k.closed_at, thread_id: k.thread_id, client: k.business || k.client_name })) };
+});
+on('POST', 'contracts/:id/deliver', async (c, p) => {
+  const u = need(c), k = await contractFor(c, p.id), note = str(c.body.note, 2000);
+  if (k.fre_id !== u.id) fail(404, 'Contract not found.');
+  if (k.stage !== 'active') fail(400, 'This contract is not waiting for delivery.');
+  if (note.length < 5) fail(400, 'Add a short note or the link to your files.', { fields: { note: 'Add a short note or a link.' } });
+  const t = { id: k.thread_id }, ts = now();
+  await c.db.batch([
+    c.db.prepare("UPDATE contracts SET stage = 'delivered', delivered_at = ? WHERE id = ? AND stage = 'active'").bind(ts, k.id),
+    c.db.prepare('INSERT INTO messages (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)').bind(k.thread_id, u.id, 'Delivered: ' + note, ts),
+    c.db.prepare('UPDATE threads SET last_at = ?, last_text = ?, last_sender = ?, client_unread = client_unread + 1 WHERE id = ?').bind(ts, ('Delivered: ' + note).slice(0, 140), u.id, t.id)
+  ]);
+  return { ok: true };
+});
+on('POST', 'contracts/:id/changes', async (c, p) => {
+  const u = need(c), k = await contractFor(c, p.id), note = str(c.body.note, 2000);
+  if (k.client_id !== u.id) fail(404, 'Contract not found.');
+  if (k.stage !== 'delivered') fail(400, 'You can ask for changes after the work is delivered.');
+  if (note.length < 5) fail(400, 'Say what needs to change.', { fields: { note: 'Say what needs to change.' } });
+  const ts = now();
+  await c.db.batch([
+    c.db.prepare("UPDATE contracts SET stage = 'active', delivered_at = NULL WHERE id = ? AND stage = 'delivered'").bind(k.id),
+    c.db.prepare('INSERT INTO messages (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)').bind(k.thread_id, u.id, 'Changes requested: ' + note, ts),
+    c.db.prepare('UPDATE threads SET last_at = ?, last_text = ?, last_sender = ?, fre_unread = fre_unread + 1 WHERE id = ?').bind(ts, ('Changes requested: ' + note).slice(0, 140), u.id, k.thread_id)
+  ]);
+  return { ok: true };
+});
+on('POST', 'contracts/:id/approve', async (c, p) => {
+  const u = need(c), k = await contractFor(c, p.id);
+  if (k.client_id !== u.id) fail(404, 'Contract not found.');
+  if (k.stage !== 'active' && k.stage !== 'delivered') fail(400, k.stage === 'disputed' ? 'This contract is in dispute. PadiHire will resolve it.' : 'This contract is already closed.');
+  await release(c, k, false);
+  return { ok: true };
+});
+on('POST', 'contracts/:id/dispute', async (c, p) => {
+  const u = need(c), k = await contractFor(c, p.id), reason = str(c.body.reason, 1000);
+  if (k.client_id !== u.id && k.fre_id !== u.id) fail(404, 'Contract not found.');
+  if (k.stage !== 'active' && k.stage !== 'delivered') fail(400, 'This contract can’t be disputed now.');
+  if (reason.length < 10) fail(400, 'Explain the problem in a sentence or two.', { fields: { reason: 'Explain the problem.' } });
+  const isClient = k.client_id === u.id;
+  const text = u.name + ' opened a dispute: “' + reason + '” The money stays in escrow until PadiHire reviews this chat and decides.';
+  await c.db.batch([
+    c.db.prepare("UPDATE contracts SET stage = 'disputed', dispute_by = ?, dispute_reason = ? WHERE id = ? AND stage IN ('active','delivered')").bind(u.id, reason, k.id)
+  ].concat(await sysMessage(c, { id: k.thread_id }, text, isClient ? 0 : 1, isClient ? 1 : 0)));
+  return { ok: true };
+});
+on('POST', 'contracts/:id/review', async (c, p) => {
+  const u = need(c), k = await contractFor(c, p.id), stars = int(c.body.stars), note = str(c.body.note, 1000);
+  if (k.client_id !== u.id) fail(404, 'Contract not found.');
+  if (k.stage !== 'paid') fail(400, 'You can review after the payment is released.');
+  if (stars < 1 || stars > 5) bad('Choose 1 to 5 stars.');
+  try {
+    await c.db.batch([
+      c.db.prepare('INSERT INTO reviews (contract_id, client_id, fre_id, stars, note, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(k.id, u.id, k.fre_id, stars, note, now()),
+      c.db.prepare('UPDATE users SET rating_sum = rating_sum + ?, rating_count = rating_count + 1 WHERE id = ?').bind(stars, k.fre_id),
+      c.db.prepare('UPDATE contracts SET rated = 1 WHERE id = ?').bind(k.id)
+    ]);
+  } catch (e) { if (isUnique(e)) fail(409, 'You already reviewed this contract.'); throw e; }
+  return { ok: true };
+});
+
+/* ---------- wallet ---------- */
+on('GET', 'wallet', async (c) => {
+  const u = need(c), s = await settings(c);
+  const [ledger, tops, wds] = await c.db.batch([
+    c.db.prepare('SELECT id, kind, label, amount, info, created_at FROM ledger WHERE user_id = ? ORDER BY id DESC LIMIT 100').bind(u.id),
+    c.db.prepare("SELECT id, amount, ref, status, note, created_at FROM topups WHERE user_id = ? AND (status = 'pending' OR created_at > ?) ORDER BY id DESC LIMIT 10").bind(u.id, now() - 14 * DAY),
+    c.db.prepare("SELECT id, amount, status, note, created_at FROM withdrawals WHERE user_id = ? AND (status = 'pending' OR created_at > ?) ORDER BY id DESC LIMIT 10").bind(u.id, now() - 30 * DAY)
+  ]);
+  const w = await walletNums(c, u.id);
+  return {
+    avail: u.avail, escrow_out: w.escrow_out, escrow_in: w.escrow_in, ledger: ledger.results, topups: tops.results, withdrawals: wds.results,
+    bank: { name: u.bank_name, acct: u.bank_acct, holder: u.bank_holder },
+    company_bank: { name: s.bank_name, acct: s.bank_acct, holder: s.bank_holder }
+  };
+});
+on('POST', 'topups', async (c) => {
+  const u = need(c), s = await settings(c), amount = int(c.body.amount);
+  if (amount < 500) fail(400, 'Enter at least ₦500.', { fields: { amount: 'Enter at least ₦500.' } });
+  if (amount > 10000000) fail(400, 'For more than ₦10,000,000, please contact support.', { fields: { amount: 'Too large.' } });
+  if (!s.bank_acct) fail(503, 'Top-ups are not open yet. Please try again later.');
+  const pending = await c.db.prepare("SELECT COUNT(*) AS n FROM topups WHERE user_id = ? AND status = 'pending'").bind(u.id).first();
+  if (pending.n >= 3) fail(429, 'You already have 3 transfers waiting to be confirmed.');
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', rnd = crypto.getRandomValues(new Uint8Array(6));
+  const ref = 'PH' + Array.from(rnd).map((x) => letters[x % letters.length]).join('');
+  await c.db.prepare('INSERT INTO topups (user_id, amount, ref, created_at) VALUES (?, ?, ?, ?)').bind(u.id, amount, ref, now()).run();
+  return { ok: true, ref, amount, bank: { name: s.bank_name, acct: s.bank_acct, holder: s.bank_holder } };
+});
+on('POST', 'withdrawals', async (c) => {
+  const u = need(c), amount = int(c.body.amount);
+  if (!u.bank_acct) fail(400, 'Add your bank account first.');
+  if (amount < 1000) fail(400, 'The minimum withdrawal is ₦1,000.', { fields: { amount: 'At least ₦1,000.' } });
+  if (amount > u.avail) fail(400, 'You can withdraw up to ' + naira(u.avail) + '.', { fields: { amount: 'Up to ' + naira(u.avail) + '.' } });
+  const ts = now();
+  try {
+    await c.db.batch([
+      c.db.prepare('UPDATE users SET avail = avail - ? WHERE id = ?').bind(amount, u.id),
+      c.db.prepare('INSERT INTO withdrawals (user_id, amount, bank_name, bank_acct, bank_holder, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(u.id, amount, u.bank_name, u.bank_acct, u.bank_holder, ts),
+      c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, created_at) VALUES (?, ?, ?, ?, ?)').bind(u.id, 'withdraw', 'Withdrawal to ' + u.bank_name + ' ••' + u.bank_acct.slice(-4), -amount, ts)
+    ]);
+  } catch (e) { if (isCheck(e)) fail(400, 'Your balance is too low for that amount.'); throw e; }
+  return { ok: true };
+});
+
+/* ---------- admin ---------- */
+on('GET', 'admin/summary', async (c) => {
+  needAdmin(c);
+  const q = (sql, ...a) => c.db.prepare(sql).bind(...a);
+  const r = await c.db.batch([
+    q('SELECT COUNT(*) AS n FROM users'),
+    q("SELECT COUNT(*) AS n FROM users WHERE cat != ''"),
+    q("SELECT COUNT(*) AS n FROM jobs WHERE status = 'open'"),
+    q("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS s FROM topups WHERE status = 'pending'"),
+    q("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS s FROM withdrawals WHERE status = 'pending'"),
+    q("SELECT COUNT(*) AS n FROM contracts WHERE stage = 'disputed'"),
+    q("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
+    q('SELECT COALESCE(SUM(avail), 0) AS s FROM users'),
+    q("SELECT COALESCE(SUM(amount), 0) AS s FROM contracts WHERE stage IN ('active','delivered','disputed')"),
+    q('SELECT COALESCE(SUM(CASE WHEN fee_refunded = 0 THEN client_fee ELSE 0 END), 0) AS cf, COALESCE(SUM(fre_fee), 0) AS ff FROM contracts'),
+    q("SELECT COALESCE(SUM(amount), 0) AS s FROM topups WHERE status = 'confirmed'"),
+    q("SELECT COALESCE(SUM(amount), 0) AS s FROM withdrawals WHERE status = 'paid'"),
+    q("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS s FROM contracts WHERE stage IN ('active','delivered','disputed')")
+  ]);
+  const v = r.map((x) => x.results[0]);
+  const fees = v[9].cf + v[9].ff, bank = v[10].s - v[11].s, owed = v[7].s + v[8].s + v[4].s;
+  return {
+    users: v[0].n, freelancers: v[1].n, open_jobs: v[2].n,
+    pending_topups: v[3], pending_withdrawals: v[4], disputes: v[5].n, reports: v[6].n, live_contracts: v[12],
+    money: { wallets: v[7].s, escrow: v[8].s, pending_withdrawals: v[4].s, fees, client_fees: v[9].cf, fre_fees: v[9].ff, confirmed_topups: v[10].s, paid_withdrawals: v[11].s, bank_should_hold: bank, difference: bank - owed - fees }
+  };
+});
+on('GET', 'admin/topups', async (c) => {
+  needAdmin(c);
+  const st = ['pending', 'confirmed', 'rejected'].indexOf(c.q.get('status')) >= 0 ? c.q.get('status') : 'pending';
+  const rows = (await c.db.prepare('SELECT t.*, u.name, u.email, u.phone, u.business FROM topups t JOIN users u ON u.id = t.user_id WHERE t.status = ? ORDER BY t.id ' + (st === 'pending' ? 'ASC' : 'DESC') + ' LIMIT 200').bind(st).all()).results;
+  return { topups: rows };
+});
+on('POST', 'admin/topups/:id/confirm', async (c, p) => {
+  needAdmin(c);
+  const t = await c.db.prepare('SELECT * FROM topups WHERE id = ?').bind(int(p.id)).first();
+  if (!t || t.status !== 'pending') fail(400, 'This top-up was already handled.');
+  const amount = c.body.amount ? int(c.body.amount) : t.amount;
+  if (amount < 1) bad('Enter the amount you received.');
+  const ts = now();
+  try {
+    await c.db.batch([
+      c.db.prepare("UPDATE topups SET status = 'confirmed', amount = ?, decided_at = ? WHERE id = ? AND status = 'pending'").bind(amount, ts, t.id),
+      c.db.prepare('UPDATE users SET avail = avail + ?, verified = 1 WHERE id = ?').bind(amount, t.user_id),
+      c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(t.user_id, 'topup', 'Top-up by bank transfer · ' + t.ref, amount, 'topup:' + t.id, ts)
+    ]);
+  } catch (e) { if (isUnique(e)) fail(409, 'This top-up was already confirmed.'); throw e; }
+  return { ok: true };
+});
+on('POST', 'admin/topups/:id/reject', async (c, p) => {
+  needAdmin(c);
+  const r = await c.db.prepare("UPDATE topups SET status = 'rejected', note = ?, decided_at = ? WHERE id = ? AND status = 'pending'").bind(str(c.body.note, 200) || 'Transfer not found', now(), int(p.id)).run();
+  if (!r.meta.changes) fail(400, 'This top-up was already handled.');
+  return { ok: true };
+});
+on('GET', 'admin/withdrawals', async (c) => {
+  needAdmin(c);
+  const st = ['pending', 'paid', 'rejected'].indexOf(c.q.get('status')) >= 0 ? c.q.get('status') : 'pending';
+  const rows = (await c.db.prepare('SELECT w.*, u.name, u.email, u.phone FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.status = ? ORDER BY w.id ' + (st === 'pending' ? 'ASC' : 'DESC') + ' LIMIT 200').bind(st).all()).results;
+  return { withdrawals: rows };
+});
+on('POST', 'admin/withdrawals/:id/paid', async (c, p) => {
+  needAdmin(c);
+  const r = await c.db.prepare("UPDATE withdrawals SET status = 'paid', note = ?, decided_at = ? WHERE id = ? AND status = 'pending'").bind(str(c.body.note, 200), now(), int(p.id)).run();
+  if (!r.meta.changes) fail(400, 'This withdrawal was already handled.');
+  return { ok: true };
+});
+on('POST', 'admin/withdrawals/:id/reject', async (c, p) => {
+  needAdmin(c);
+  const w = await c.db.prepare('SELECT * FROM withdrawals WHERE id = ?').bind(int(p.id)).first();
+  if (!w || w.status !== 'pending') fail(400, 'This withdrawal was already handled.');
+  const ts = now(), note = str(c.body.note, 200) || 'Bank details could not be used';
+  try {
+    await c.db.batch([
+      c.db.prepare("UPDATE withdrawals SET status = 'rejected', note = ?, decided_at = ? WHERE id = ? AND status = 'pending'").bind(note, ts, w.id),
+      c.db.prepare('UPDATE users SET avail = avail + ? WHERE id = ?').bind(w.amount, w.user_id),
+      c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(w.user_id, 'withdraw_back', 'Withdrawal returned: ' + note, w.amount, 'wdback:' + w.id, ts)
+    ]);
+  } catch (e) { if (isUnique(e)) fail(409, 'This withdrawal was already returned.'); throw e; }
+  return { ok: true };
+});
+on('GET', 'admin/disputes', async (c) => {
+  needAdmin(c);
+  const rows = (await c.db.prepare("SELECT k.*, cu.name AS client_name, cu.business, cu.phone AS client_phone, fu.name AS fre_name, fu.phone AS fre_phone, du.name AS dispute_name FROM contracts k JOIN users cu ON cu.id = k.client_id JOIN users fu ON fu.id = k.fre_id LEFT JOIN users du ON du.id = k.dispute_by WHERE k.stage = 'disputed' ORDER BY k.id ASC").all()).results;
+  return { disputes: rows };
+});
+on('POST', 'admin/contracts/:id/release', async (c, p) => {
+  needAdmin(c);
+  const k = await contractFor(c, p.id);
+  if (LIVE.indexOf(k.stage) < 0) fail(400, 'This contract is already closed.');
+  await release(c, k, true);
+  return { ok: true };
+});
+on('POST', 'admin/contracts/:id/refund', async (c, p) => {
+  needAdmin(c);
+  const k = await contractFor(c, p.id), withFee = !!c.body.fee;
+  if (LIVE.indexOf(k.stage) < 0) fail(400, 'This contract is already closed.');
+  const back = k.amount + (withFee ? k.client_fee : 0), ts = now();
+  const text = 'PadiHire reviewed this contract and refunded the client. The contract is closed.';
+  try {
+    await c.db.batch([
+      c.db.prepare("UPDATE contracts SET stage = 'refunded', closed_at = ?, fee_refunded = ? WHERE id = ? AND stage IN ('active','delivered','disputed')").bind(ts, withFee ? 1 : 0, k.id),
+      c.db.prepare('UPDATE users SET avail = avail + ? WHERE id = ?').bind(back, k.client_id),
+      c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(k.client_id, 'refund', 'Refund · ' + k.title + (withFee ? ' (with service fee)' : ''), back, 'refund:' + k.id, ts)
+    ].concat(await sysMessage(c, { id: k.thread_id }, text, 1, 1)));
+  } catch (e) { if (isUnique(e)) fail(409, 'This contract was already refunded.'); throw e; }
+  return { ok: true };
+});
+on('GET', 'admin/threads/:id', async (c, p) => {
+  needAdmin(c);
+  const t = await c.db.prepare('SELECT * FROM threads WHERE id = ?').bind(int(p.id)).first();
+  if (!t) fail(404, 'Conversation not found.');
+  const msgs = (await c.db.prepare('SELECT m.*, u.name FROM messages m LEFT JOIN users u ON u.id = m.sender_id WHERE m.thread_id = ? ORDER BY m.id ASC LIMIT 500').bind(t.id).all()).results;
+  return { messages: msgs.map((m) => ({ id: m.id, name: m.sender_id ? m.name : 'PadiHire', side: m.sender_id === t.client_id ? 'client' : m.sender_id === t.fre_id ? 'fre' : 'system', body: m.body, created_at: m.created_at })) };
+});
+on('GET', 'admin/reports', async (c) => {
+  needAdmin(c);
+  const rows = (await c.db.prepare("SELECT r.*, j.title, j.status AS job_status, u.name AS reporter, cu.name AS client_name, cu.business FROM reports r JOIN jobs j ON j.id = r.job_id JOIN users u ON u.id = r.user_id JOIN users cu ON cu.id = j.client_id WHERE r.status = 'open' ORDER BY r.id ASC LIMIT 200").all()).results;
+  return { reports: rows };
+});
+on('POST', 'admin/reports/:id/close', async (c, p) => {
+  needAdmin(c);
+  await c.db.prepare("UPDATE reports SET status = 'closed' WHERE id = ?").bind(int(p.id)).run();
+  return { ok: true };
+});
+on('POST', 'admin/jobs/:id/remove', async (c, p) => {
+  needAdmin(c);
+  const id = int(p.id);
+  const r = await c.db.prepare("UPDATE jobs SET status = 'removed' WHERE id = ? AND status = 'open'").bind(id).run();
+  if (!r.meta.changes) fail(400, 'Only open jobs can be removed.');
+  await c.db.batch([
+    c.db.prepare("UPDATE proposals SET status = 'lost' WHERE job_id = ? AND status = 'sent'").bind(id),
+    c.db.prepare("UPDATE reports SET status = 'closed' WHERE job_id = ?").bind(id)
+  ]);
+  return { ok: true };
+});
+on('GET', 'admin/users', async (c) => {
+  needAdmin(c);
+  const term = str(c.q.get('q'), 80).toLowerCase(), like = '%' + term.replace(/[%_]/g, '') + '%';
+  const rows = (await c.db.prepare('SELECT id, name, email, phone, city, role, cat, business, avail, verified, status, jobs_done, rating_count, created_at FROM users' + (term ? ' WHERE LOWER(name) LIKE ? OR LOWER(email) LIKE ? OR phone LIKE ? OR LOWER(business) LIKE ?' : '') + ' ORDER BY id DESC LIMIT 100').bind(...(term ? [like, like, like, like] : [])).all()).results;
+  return { users: rows };
+});
+on('POST', 'admin/users/:id/suspend', async (c, p) => {
+  needAdmin(c);
+  const id = int(p.id);
+  if (id === c.user.id) bad('You can’t suspend yourself.');
+  await c.db.batch([
+    c.db.prepare("UPDATE users SET status = 'suspended' WHERE id = ?").bind(id),
+    c.db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id)
+  ]);
+  return { ok: true };
+});
+on('POST', 'admin/users/:id/unsuspend', async (c, p) => {
+  needAdmin(c);
+  await c.db.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(int(p.id)).run();
+  return { ok: true };
+});
+on('POST', 'admin/users/:id/reset-password', async (c, p) => {
+  needAdmin(c);
+  const letters = 'abcdefghjkmnpqrstuvwxyz23456789', rnd = crypto.getRandomValues(new Uint8Array(10));
+  const temp = Array.from(rnd).map((x) => letters[x % letters.length]).join('');
+  const id = int(p.id);
+  await c.db.batch([
+    c.db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').bind(await hashPass(temp), id),
+    c.db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id)
+  ]);
+  return { ok: true, password: temp };
+});
+const SETTING_KEYS = { client_fee_pct: [0, 30], fre_fee_pct: [0, 40], monthly_proposals: [1, 500], auto_release_days: [1, 30], bank_name: 1, bank_acct: 1, bank_holder: 1, support_whatsapp: 1 };
+on('GET', 'admin/settings', async (c) => { needAdmin(c); return { settings: await settings(c) }; });
+on('POST', 'admin/settings', async (c) => {
+  needAdmin(c);
+  const stmts = [];
+  Object.keys(SETTING_KEYS).forEach((k) => {
+    if (!(k in c.body)) return;
+    const rule = SETTING_KEYS[k];
+    let v = c.body[k];
+    if (Array.isArray(rule)) { v = int(v); if (v < rule[0] || v > rule[1]) bad('Check the value for ' + k.replace(/_/g, ' ') + '.'); v = String(v); }
+    else v = str(v, 80);
+    stmts.push(c.db.prepare('INSERT INTO settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').bind(k, v));
+  });
+  if (stmts.length) await c.db.batch(stmts);
+  c.set = null;
+  return { ok: true, settings: await settings(c) };
+});
