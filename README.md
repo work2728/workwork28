@@ -1,4 +1,4 @@
-# PadiHire
+# Fere
 
 Freelance marketplace for Nigeria. Runs entirely on Cloudflare:
 
@@ -56,14 +56,15 @@ Each update ships with an `update-N.sql` file. Run it **once** in the D1 Console
 - `update-3.sql`: email confirmation, password reset, email alerts, spam limits, portfolio.
 - `update-4.sql`: locations become states (36 states + FCT).
 - `update-5.sql`: profile photos, profile links (/u/name), edited jobs, withdrawal receipts.
+- `update-6.sql`: client type of business and size (jobs show these instead of the client's name).
 
 ## Email and spam protection (optional settings)
 
 These switch on by adding variables in Cloudflare: Workers & Pages > workwork28 > Settings > Variables and Secrets (Production). Redeploy after adding them.
 
 - `RESEND_API_KEY` (secret): from resend.com > API Keys, after your domain is verified there.
-- `MAIL_FROM`: the sender, for example `PadiHire <hello@padihire.com>`. It must use the domain you verified in Resend.
-- `SITE_URL`: your live address, for example `https://padihire.com`. Used for links inside emails and for link previews (WhatsApp, Facebook) of /j/ job links and /u/ profile links.
+- `MAIL_FROM`: the sender, for example `Fere <hello@yourdomain.ng>`. It must use the domain you verified in Resend.
+- `SITE_URL`: your live address, for example `https://yourdomain.ng`. Used for links inside emails and for link previews (WhatsApp, Facebook) of /j/ job links and /u/ profile links.
 - `TURNSTILE_SITEKEY` and `TURNSTILE_SECRET` (secret): from Cloudflare > Turnstile > Add widget, with your domain added.
 
 - Workers AI binding named `AI` (Settings > Bindings > Add > Workers AI): switches on "Fill this in from your CV" in profile setup. It reads PDF and .docx CVs. Each read uses a little Workers AI usage, which has a free daily allowance; check Cloudflare's Workers AI pricing page for current limits. Each user can read up to 6 CVs a day.
@@ -73,7 +74,7 @@ Without the Resend variables, the site works as before: no emails, and "Forgot p
 ## How the money works
 
 - A client posts a job for free.
-- When they hire, they pay the freelancer's price plus the client fee (5%) from their wallet. The price is held in escrow and the fee is PadiHire's.
+- When they hire, they pay the freelancer's price plus the client fee (5%) from their wallet. The price is held in escrow and the fee is Fere's.
 - When the client approves, the freelancer gets the price minus the freelancer fee (10%) in their wallet. If the client doesn't respond, this happens automatically 5 days after delivery.
 - Each side only ever sees its own fee.
 - Wallet balances can never go below zero, and no payment can be released or refunded twice.
