@@ -1,11 +1,11 @@
-/* PadiHire admin panel. Needs common.js first. Only works for emails listed in ADMIN_EMAILS. */
+/* Fere admin panel. Needs common.js first. Only works for emails listed in ADMIN_EMAILS. */
 (function () {
   'use strict';
   var A = { tab: 'overview', sub: 'pending', data: null, q: '' };
   var TABS = [['overview', 'Overview'], ['topups', 'Top-ups'], ['withdrawals', 'Withdrawals'], ['disputes', 'Disputes'], ['flags', 'Flags'], ['reports', 'Reports'], ['users', 'Users'], ['settings', 'Settings']];
 
   function chrome(counts) {
-    $('#top').innerHTML = '<div class="wrap top-in">' + brandHtml('/#/', 'PadiHire home') + '<span class="adm-tag">Admin</span><div class="top-right"><a class="login" href="/#/">Back to site</a></div></div>';
+    $('#top').innerHTML = '<div class="wrap top-in">' + brandHtml('/#/', 'Fere home') + '<span class="adm-tag">Admin</span><div class="top-right"><a class="login" href="/#/">Back to site</a></div></div>';
     $('#atabs').innerHTML = '<div class="wrap"><div class="utabs" role="tablist">' + TABS.map(function (t) {
       var n = counts && counts[t[0]];
       return '<button type="button" role="tab" aria-selected="' + (A.tab === t[0]) + '" data-act="tab" data-v="' + t[0] + '">' + t[1] + (n ? ' <span class="count">' + n + '</span>' : '') + '</button>';
@@ -31,7 +31,7 @@
             return '<button type="button" class="adm-stat" data-act="tab" data-v="' + x[3] + '"><span class="small">' + x[0] + '</span><b>' + x[1] + '</b>' + (x[2] ? '<span class="small">' + x[2] + '</span>' : '') + '</button>';
           }).join('') + '</div>' +
           '<section class="d-block"><h2 class="sub">Money check</h2><dl class="kv">' + kv('Confirmed top-ups', naira(m.confirmed_topups)) + kv('Paid out to banks', '−' + naira(m.paid_withdrawals)) + kv('Should be in your bank account', naira(m.bank_should_hold), true) + '</dl>' +
-          '<p class="small" style="margin:14px 0 6px">Where that money belongs</p><dl class="kv">' + kv('Users’ wallet balances', naira(m.wallets)) + kv('Held in escrow (' + s.live_contracts.n + ' live contracts)', naira(m.escrow)) + kv('Withdrawals waiting to be paid', naira(m.pending_withdrawals)) + kv('PadiHire fees earned', naira(m.fees)) + '</dl>' +
+          '<p class="small" style="margin:14px 0 6px">Where that money belongs</p><dl class="kv">' + kv('Users’ wallet balances', naira(m.wallets)) + kv('Held in escrow (' + s.live_contracts.n + ' live contracts)', naira(m.escrow)) + kv('Withdrawals waiting to be paid', naira(m.pending_withdrawals)) + kv('Fere fees earned', naira(m.fees)) + '</dl>' +
           '<p class="' + (ok ? 'ok-t' : 'act-t') + '" style="margin-top:12px">' + (ok ? ic('tick') + 'Balanced' : 'Off by ' + naira(m.difference) + '. Check recent top-ups and withdrawals.') + '</p>' +
           '<p class="small" style="margin-top:6px">Fees: ' + naira(m.client_fees) + ' from clients, ' + naira(m.fre_fees) + ' from freelancers.</p></section>' +
           '<section class="d-block"><dl class="kv">' + kv('Users', s.users) + kv('Freelancer profiles', s.freelancers) + kv('Open jobs', s.open_jobs) + '</dl></section>';
@@ -75,7 +75,7 @@
       return api('GET', 'admin/flags?status=' + (A.sub === 'reviewed' ? 'reviewed' : 'open')).then(function (d) {
         A.data = d.flags;
         var where = { message: 'Chat message', proposal: 'Proposal', job: 'Job post', profile: 'Profile' };
-        return '<h1 class="pg-title">Flags</h1><p class="pg-sub">Attempts to share contact details or deal outside PadiHire. The other person saw **** instead. The original text is shown here only.</p>' + subTabs(['pending', 'reviewed']) +
+        return '<h1 class="pg-title">Flags</h1><p class="pg-sub">Attempts to share contact details or deal outside Fere. The other person saw **** instead. The original text is shown here only.</p>' + subTabs(['pending', 'reviewed']) +
           (d.flags.length ? '<div class="rows">' + d.flags.map(function (g) {
             return '<article class="jrow adm-row">' + who(g) + '<p class="small">' + esc(where[g.context] || g.context) + ' \u00B7 ' + timeText(g.created_at) + ' \u00B7 ' + g.total + (g.total === 1 ? ' flag' : ' flags') + ' in total' + (g.user_status !== 'active' ? ' \u00B7 <strong class="act-t">Suspended</strong>' : '') + '</p>' +
               '<p class="prop-note">\u201C' + esc(g.original) + '\u201D</p><p class="small">Found: ' + esc(g.reasons) + '</p>' +

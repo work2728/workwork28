@@ -1,4 +1,4 @@
-/* PadiHire shared helpers for the app and the admin panel. */
+/* Fere shared helpers for the app and the admin panel. */
 'use strict';
 var CATS = [
   { id: 'design', label: 'Graphics & design', short: 'Design' },
@@ -17,6 +17,10 @@ var BUDGETS = [
 ];
 var LEVELS = ['Entry', 'Intermediate', 'Expert'];
 var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function longDate(ts) { var d = new Date(ts * 1000); return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear(); }
+var INDUSTRIES = ['Fashion & beauty', 'Food & drinks', 'Retail & online shop', 'Tech & software', 'Media & entertainment', 'Music & arts', 'Health & fitness', 'Education & training', 'Real estate & building', 'Finance', 'Logistics & transport', 'Events & hospitality', 'Agriculture', 'Oil, gas & energy', 'Non-profit & religious', 'Government', 'Personal project', 'Other'];
+var SIZES = [['1', 'Just me'], ['2-9', 'Small business (2 to 9 people)'], ['10-99', 'Medium business (10 to 99 people)'], ['100+', 'Large business (100+ people)']];
+function sizeLabel(v) { var m = SIZES.filter(function (x) { return x[0] === v; })[0]; return m ? m[1] : ''; }
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function num(n) { return String(Math.round(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
@@ -88,7 +92,7 @@ ICONS.share = '<path d="M12 14.5v-11M8 7.5l4-4 4 4"/><path d="M8 10.5H6.5A1.5 1.
 ICONS.camera = '<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.6-2.2h5.4L16.3 7h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.8" r="3.3"/>';
 ICONS.receipt = '<path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4z"/><path d="M9 8h6M9 11.5h6M9 15h3.5"/>';
 var LOGO = '<svg class="logo-mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><g class="lm-a"><circle cx="32" cy="24" r="10"/><rect x="24" y="40" width="16" height="46" rx="8"/><rect x="32" y="56" width="22" height="12" rx="6"/></g><g class="lm-b"><circle cx="68" cy="24" r="10"/><rect x="60" y="40" width="16" height="46" rx="8"/><rect x="48" y="56" width="20" height="12" rx="6"/></g></svg>';
-function brandHtml(href, label) { return '<a class="brand" href="' + href + '"' + (label ? ' aria-label="' + label + '"' : '') + '>' + LOGO + '<span>Padi<b>Hire</b></span></a>'; }
+function brandHtml(href, label) { return '<a class="brand" href="' + href + '"' + (label ? ' aria-label="' + label + '"' : '') + '>' + LOGO + '<span>Fere</span></a>'; }
 function ic(n, cls) { return '<svg class="ic ' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (ICONS[n] || '') + '</svg>'; }
 var AVC = [['#d7ebf2', '#0e586f'], ['#f6e1d0', '#8a3c0b'], ['#e5ddf4', '#4a2e85'], ['#dcefd8', '#245a1b'], ['#f6dce3', '#8b2140'], ['#eee6cc', '#6a5106'], ['#dbe3f2', '#21417a'], ['#d9efe9', '#11594b']];
 function face(name, cls, photo) {
@@ -105,7 +109,7 @@ function api(method, path, body) {
   if (body !== undefined || method === 'POST') { opts.headers['content-type'] = 'application/json'; opts.body = JSON.stringify(body || {}); }
   return fetch('/api/' + path, opts).then(function (r) {
     if ((r.headers.get('content-type') || '').indexOf('application/json') < 0) {
-      var e0 = new Error('The PadiHire server isn\u2019t answering yet. Check that the functions folder is in GitHub and the DB binding is added, then redeploy.');
+      var e0 = new Error('The Fere server isn\u2019t answering yet. Check that the functions folder is in GitHub and the DB binding is added, then redeploy.');
       e0.status = 503; e0.data = {}; e0.setup = true; throw e0;
     }
     return r.json().catch(function () { return {}; }).then(function (d) {
@@ -192,4 +196,4 @@ function fileLink(f) {
   return '<a class="att-file" href="' + url + '" target="_blank" rel="noopener">' + ic('file') + '<span>' + esc(f.name) + '</span><small>' + fileSize(f.size) + '</small></a>';
 }
 function filesBlock(list) { return list && list.length ? '<span class="att-row">' + list.map(fileLink).join('') + '</span>' : ''; }
-var MASK_NOTE = 'Contact details and talk of dealing outside PadiHire were hidden (****). Keep chats and payments on PadiHire to stay protected.';
+var MASK_NOTE = 'Contact details and talk of dealing outside Fere were hidden (****). Keep chats and payments on Fere to stay protected.';
