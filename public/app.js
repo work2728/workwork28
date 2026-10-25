@@ -125,6 +125,7 @@
     try { if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(function () { toast(done); }, fallback); else fallback(); } catch (e) { fallback(); }
   }
   function fullDate(ts) { var d = new Date(ts * 1000); return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() + ', ' + timeText(ts).split(' | ')[0]; }
+  function qtiles(items) { return '<nav class="qtiles" aria-label="Shortcuts">' + items.map(function (t) { return '<a class="qtile" href="' + t[0] + '"><span class="tile t-' + t[3] + '">' + ic(t[2]) + '</span>' + t[1] + '</a>'; }).join('') + '</nav>'; }
   function sideBox(title, body, link) { return '<section class="side-box">' + (title ? '<h2 class="sb-h">' + title + '</h2>' : '') + body + (link || '') + '</section>'; }
 
   /* ---------- skill picker ---------- */
@@ -501,6 +502,7 @@
         '<section class="wcard" aria-label="Wallet"><p class="wc-l">Available balance</p><p class="wc-n">' + naira(w.avail) + '</p>' +
         '<p class="wc-s">' + ic('lock') + (w.escrow_in ? naira(w.escrow_in) + ' held in escrow for you' : 'Client payments are held safely in escrow') + '</p>' +
         '<div class="wc-btns"><button type="button" class="btn wc-b1" data-act="withdraw">Withdraw</button><a class="btn wc-b2" href="#/wallet">History</a></div></section>' +
+        qtiles([['#/work', 'Find work', 'search', 'violet'], ['#/proposals', 'My work', 'briefcase', 'teal'], ['#/wallet', 'Wallet', 'wallet', 'amber'], ['#/edit-profile', 'Profile', 'user', 'rose']]) +
         '<div class="stats">' + stat('#/proposals', sent, sent === 1 ? 'Proposal' : 'Proposals') + stat('#/contracts', act, act === 1 ? 'Active job' : 'Active jobs') + stat('#/proposals', d.props.left, 'Bids left') + '</div>' +
         (score < 100 ? '<a class="nudge" href="#/edit-profile"><span class="nudge-t"><strong>Your profile is ' + score + '% complete</strong><span class="small">Add your ' + missing(u) + '. Complete profiles get hired more.</span></span><span class="bar"><span style="width:' + score + '%"></span></span></a>' : '') +
         secHead(d.all ? 'Newest jobs' : 'Jobs for you', '<a class="see" href="#/work">See all</a>') +
@@ -574,8 +576,8 @@
         else g.done.push(j);
       });
       var s = '<div class="wrap scr home">' + hello(esc(u.business || 'Welcome back'), 'Hi, ' + esc(first(u.name)), '<a class="icon-btn" href="#/wallet" aria-label="Wallet history">' + ic('wallet') + '</a>') + verifyBanner() +
-        '<section class="wcard light" aria-label="Wallet"><div class="wc-row"><div><p class="wc-l">Wallet</p><p class="wc-n">' + naira(d.wallet.avail) + '</p><p class="wc-s">' + (d.wallet.escrow_out ? ic('lock') + naira(d.wallet.escrow_out) + ' held in escrow' : 'Add money when you are ready to hire') + '</p></div><button type="button" class="btn btn-primary" data-act="topup">' + ic('plus') + 'Add money</button></div></section>' +
-        '<section class="cta"><h2>Need something done?</h2><p>Post a job for free. Freelancers send you proposals, and you pay only when you hire.</p><a class="btn btn-primary" href="#/post">' + ic('plus') + 'Post a job</a></section>';
+        '<section class="wcard" aria-label="Wallet"><div class="wc-row"><div><p class="wc-l">Wallet balance</p><p class="wc-n">' + naira(d.wallet.avail) + '</p><p class="wc-s">' + (d.wallet.escrow_out ? ic('lock') + naira(d.wallet.escrow_out) + ' held in escrow' : 'Add money when you are ready to hire') + '</p></div><button type="button" class="btn wc-b1" data-act="topup">' + ic('plus') + 'Add money</button></div></section>' +
+        qtiles([['#/post', 'Post a job', 'plus', 'violet'], ['#/freelancers', 'Find talent', 'users', 'teal'], ['#/wallet', 'Wallet', 'wallet', 'amber'], ['#/help', 'Help', 'help', 'rose']]);
       d.jobs.filter(function (j) { return j.stage === 'delivered'; }).forEach(function (j) { s += '<div class="flag"><p><strong>' + esc(j.fre_name) + '</strong> delivered “' + esc(j.title) + '”. Review it to release ' + naira(j.amount) + '.</p><a class="btn btn-dark btn-sm" href="#/chat/' + j.thread_id + '">Review</a></div>'; });
       d.wallet.topups.filter(function (t) { return t.status === 'pending'; }).forEach(function (t) { s += '<div class="flag"><p>We’re checking your transfer of <strong>' + naira(t.amount) + '</strong> (reference ' + esc(t.ref) + '). Your wallet updates once it’s confirmed.</p></div>'; });
       if (!g[S.ctab].length && !(S.picked && S.picked.ctab)) { var alt = ['progress', 'open', 'done'].filter(function (k) { return g[k].length; })[0]; if (alt) S.ctab = alt; }
@@ -669,12 +671,16 @@
     load: function () { return api('GET', 'threads'); },
     html: function (d) {
       var cliR = role() === 'cli';
-      return '<div class="wrap scr col"><h1 class="pg-title">Messages</h1>' +
+      var mf = S.mfilter || 'all', unreadN = d.threads.filter(function (t) { return t.unread; }).length;
+      var list = d.threads.filter(function (t) { return mf === 'unread' ? t.unread : mf === 'contracts' ? !!t.stage : true; });
+      var stg = { active: ['In progress', 'st-ok'], delivered: ['Delivered', 'st-act'], paid: ['Paid', 'st-ok'], disputed: ['Dispute', 'st-warn'], refunded: ['Refunded', 'st-done'] };
+      return '<div class="wrap scr col"><h1 class="pg-title">Chats</h1>' +
         (S.me.unread_other ? '<p class="small" style="margin-top:6px">You have ' + S.me.unread_other + ' unread as a ' + (cliR ? 'freelancer' : 'client') + '. <button type="button" class="link-btn" data-act="switch" data-v="' + (cliR ? 'fre' : 'cli') + '">Switch to see them</button></p>' : '') +
-        (d.threads.length ? '<div class="rows" style="margin-top:14px">' + d.threads.map(function (t) {
+        (d.threads.length ? '<div class="fchips" role="group" aria-label="Filter chats">' + [['all', 'All'], ['unread', 'Unread' + (unreadN ? ' ' + unreadN : '')], ['contracts', 'Contracts']].map(function (c) { return '<button type="button" class="fchip" data-act="tab" data-tab="mfilter" data-v="' + c[0] + '" aria-pressed="' + (mf === c[0]) + '">' + c[1] + '</button>'; }).join('') + '</div>' : '') +
+        (!d.threads.length ? '' : !list.length ? emptyBox(mf === 'unread' ? 'No unread chats' : 'No contracts yet', mf === 'unread' ? 'You’re all caught up.' : 'Chats where someone was hired show here.') : '<div class="rows" style="margin-top:14px">' + list.map(function (t) {
           return '<a class="mrow' + (t.unread ? ' unread' : '') + '" href="#/chat/' + t.id + '">' + face(t.other, '', t.other_photo) + '<span class="m-main"><span class="m-name">' + esc(t.other) + '</span><span class="m-job">' + esc(t.job) + '</span><span class="m-last">' + (t.mine ? 'You: ' : '') + esc(t.last_text || 'No messages yet') + '</span></span>' +
-            '<span class="m-right"><span>' + (t.last_at ? ago(t.last_at).replace(' ago', '') : '') + '</span>' + (t.unread ? '<span class="dot" aria-label="Unread"></span>' : '') + '</span></a>';
-        }).join('') + '</div>' : emptyBox('No messages yet', cliR ? 'Message a freelancer from their proposal, or invite someone to your job.' : 'When a client messages you about a proposal, you can chat here.')) + '</div>';
+            '<span class="m-right"><span>' + (t.last_at ? ago(t.last_at).replace(' ago', '') : '') + '</span>' + (t.unread ? '<span class="dot" aria-label="Unread"></span>' : '') + (t.stage && stg[t.stage] ? stChip(stg[t.stage][0], stg[t.stage][1]) : '') + '</span></a>';
+        }).join('') + '</div>') + (d.threads.length ? '' : emptyBox('No messages yet', cliR ? 'Message a freelancer from their proposal, or invite someone to your job.' : 'When a client messages you about a proposal, you can chat here.')) + '</div>';
     }
   };
   function timeline(items) { return '<ol class="tl">' + items.map(function (it) { return '<li class="' + (it[1] ? 'done' : '') + '"><span class="tl-dot">' + (it[1] ? ic('tick') : '') + '</span><span>' + it[0] + '</span></li>'; }).join('') + '</ol>'; }
@@ -801,7 +807,7 @@
     return '<article class="rcpt" aria-label="' + head + '"><header class="rc-head">' + brandHtml('#/', 'Fere home') + '<div class="rc-no"><p class="rc-kind">' + head + '</p><p class="rc-num">' + esc(r.number) + '</p></div></header>' +
       '<p class="rc-status' + (tone ? ' ' + tone : '') + '">' + esc(status) + '</p>' +
       '<dl class="kv rc-rows">' + rows + '</dl><dl class="kv box rc-money">' + money + '</dl>' +
-      '<p class="rc-foot">Fere · Freelance work and talent in Nigeria' + (S.me.support_whatsapp ? ' · Support on WhatsApp: ' + esc(S.me.support_whatsapp) : '') + '<br>Printed ' + fullDate(Math.floor(Date.now() / 1000)) + '</p></article>';
+      '<p class="rc-foot">Fere · a service of FERE NG LTD' + (S.me.support_whatsapp ? ' · Support on WhatsApp: ' + esc(S.me.support_whatsapp) : '') + '<br>Printed ' + fullDate(Math.floor(Date.now() / 1000)) + '</p></article>';
   }
   V.receipt = {
     need: 'any', title: function (d) { return 'Receipt ' + d.receipt.number; },
@@ -811,23 +817,32 @@
         '<p class="small no-print rc-tip">Tap “Save as PDF”, then choose “Save as PDF” as the printer. On iPhone, tap Share in the print screen to save it to Files.</p></div>';
     }
   };
-  function mitem(icon, title, sub, attrs) { return '<li><' + (attrs.indexOf('href=') === 0 ? 'a ' : 'button type="button" ') + attrs + '>' + ic(icon) + '<span><strong>' + title + '</strong>' + (sub ? '<small>' + sub + '</small>' : '') + '</span>' + ic('next') + '</' + (attrs.indexOf('href=') === 0 ? 'a' : 'button') + '></li>'; }
+  function mitem(icon, title, sub, attrs, tone) { return '<li><' + (attrs.indexOf('href=') === 0 ? 'a ' : 'button type="button" ') + attrs + '><span class="tile t-' + (tone || 'violet') + '">' + ic(icon) + '</span>' + '<span><strong>' + title + '</strong>' + (sub ? '<small>' + sub + '</small>' : '') + '</span>' + ic('next') + '</' + (attrs.indexOf('href=') === 0 ? 'a' : 'button') + '></li>'; }
+  function mgroup(label, items) { return (label ? '<p class="mg-l">' + label + '</p>' : '') + '<ul class="mlist">' + items.join('') + '</ul>'; }
   V.account = {
     need: 'any', title: function () { return 'Account'; },
     html: function () {
       var u = U(), cliR = role() === 'cli', w = S.me.wallet || {};
       var line = cliR ? (u.business || 'Client') + (u.city ? ' · ' + u.city : '') : (u.title || 'Freelancer') + (u.city ? ' · ' + u.city : '');
-      return '<div class="wrap scr col"><div class="p-head">' + face(u.name, 'av-lg', u.photo) + '<div style="min-width:0"><h1 class="pg-title">' + esc(u.name) + '</h1><p class="small">' + esc(line) + '</p>' + (!cliR && u.reviews ? '<p class="stars">' + ic('star', 'is') + '<b>' + u.rating.toFixed(1) + '</b> · ' + u.jobs_done + ' jobs done</p>' : '') + '</div></div>' +
-        '<ul class="mlist">' + mitem('wallet', 'Wallet', naira(w.avail) + ' available', 'href="#/wallet"') +
-        mitem('pen', 'Edit profile', cliR ? 'Name, business, city, password' : 'Headline, bio, skills, price, password', 'href="#/edit-profile"') +
-        (cliR ? mitem('plus', 'Post a job', '', 'href="#/post"') : mitem('eye', 'View public profile', '', 'href="#/freelancer/' + u.id + '"') + (u.username ? mitem('share', 'Share your profile', esc(location.host + '/u/' + u.username), 'data-act="share" data-url="' + esc(proUrl(u)) + '" data-title="' + esc(u.name + ' on Fere') + '"') : '') + mitem('heart', 'Saved jobs', '', 'href="#/work" data-saved="1"')) +
-        mitem('bank', 'Bank account', u.bank.acct ? esc(u.bank.name) + ' •••• ' + esc(u.bank.acct.slice(-4)) : 'Not added yet', 'data-act="bank"') +
-        mitem(cliR ? 'laptop' : 'briefcase', cliR ? 'Switch to freelancing' : 'Switch to hiring', cliR ? 'Find work with the same account' : 'Post jobs with the same account', 'data-act="switch" data-v="' + (cliR ? 'fre' : 'cli') + '"') +
-        (S.me.mail ? mitem('bell', 'Email alerts', u.email_alerts ? 'On for messages and proposals' : 'Off. Payment emails still come', 'data-act="alerts"') : '') +
-        mitem('help', 'Help and FAQ', 'How payments, escrow and fees work', 'href="#/help"') + mitem('doc', 'Terms and rules', '', 'href="#/terms"') + mitem('shield', 'Privacy policy', 'How we use and protect your data', 'href="#/privacy"') +
-        (S.me.support_whatsapp ? mitem('whatsapp', 'Contact support', 'WhatsApp', 'href="https://wa.me/' + esc(waNum(S.me.support_whatsapp)) + '" target="_blank" rel="noopener"') : '') +
-        (S.me.is_admin ? mitem('gear', 'Admin panel', 'Top-ups, withdrawals, disputes', 'href="/admin"') : '') +
-        mitem('logout', 'Log out', '', 'data-act="signout"') + '</ul></div>';
+      var acct = [mitem('pen', 'Edit profile', cliR ? 'Name, business, state, password' : 'Headline, bio, skills, price, password', 'href="#/edit-profile"', 'amber')];
+      if (cliR) acct.push(mitem('plus', 'Post a job', 'Free to post', 'href="#/post"', 'violet'));
+      else {
+        acct.push(mitem('eye', 'View public profile', '', 'href="#/freelancer/' + u.id + '"', 'blue'));
+        if (u.username) acct.push(mitem('share', 'Share your profile', esc(location.host + '/u/' + u.username), 'data-act="share" data-url="' + esc(proUrl(u)) + '" data-title="' + esc(u.name + ' on Fere') + '"', 'violet'));
+        acct.push(mitem('heart', 'Saved jobs', '', 'href="#/work" data-saved="1"', 'rose'));
+      }
+      acct.push(mitem(cliR ? 'laptop' : 'briefcase', cliR ? 'Switch to freelancing' : 'Switch to hiring', cliR ? 'Find work with the same account' : 'Post jobs with the same account', 'data-act="switch" data-v="' + (cliR ? 'fre' : 'cli') + '"', 'blue'));
+      if (S.me.mail) acct.push(mitem('bell', 'Email alerts', u.email_alerts ? 'On for messages and proposals' : 'Off. Payment emails still come', 'data-act="alerts"', 'slate'));
+      var help = [mitem('help', 'Help and FAQ', 'How payments, escrow and fees work', 'href="#/help"', 'rose')];
+      if (S.me.support_whatsapp) help.push(mitem('whatsapp', 'Contact support', 'WhatsApp', 'href="https://wa.me/' + esc(waNum(S.me.support_whatsapp)) + '" target="_blank" rel="noopener"', 'green'));
+      help.push(mitem('doc', 'Terms and rules', '', 'href="#/terms"', 'slate'), mitem('shield', 'Privacy policy', 'How we use and protect your data', 'href="#/privacy"', 'slate'));
+      return '<div class="wrap scr col">' +
+        '<section class="me-card"><div class="me-cover" aria-hidden="true"></div><div class="me-body">' + face(u.name, 'av-lg', u.photo) + '<h1 class="me-name">' + esc(u.name) + '</h1><p class="small">' + esc(line) + '</p>' +
+        (!cliR && u.reviews ? '<p class="stars">' + ic('star', 'is') + '<b>' + u.rating.toFixed(1) + '</b> · ' + u.jobs_done + ' jobs done</p>' : '') + '</div></section>' +
+        mgroup('Money', [mitem('wallet', 'Wallet', naira(w.avail) + ' available', 'href="#/wallet"', 'violet'), mitem('bank', 'Bank account', u.bank.acct ? esc(u.bank.name) + ' •••• ' + esc(u.bank.acct.slice(-4)) : 'Not added yet', 'data-act="bank"', 'teal')]) +
+        mgroup('Account', acct) + mgroup('Help', help) +
+        (S.me.is_admin ? mgroup('Admin', [mitem('gear', 'Admin panel', 'Top-ups, withdrawals, disputes', 'href="/admin"', 'slate')]) : '') +
+        mgroup('', [mitem('logout', 'Log out', '', 'data-act="signout"', 'rose')]) + '</div>';
     }
   };
   function profileHtml(setup) {
@@ -897,7 +912,7 @@
     title: function () { return 'Terms and rules'; },
     html: function () {
       function sec(t, items) { return '<section class="d-block"><h2 class="sub">' + t + '</h2><ul class="terms">' + items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></section>'; }
-      return '<div class="wrap scr col">' + backBtn() + '<h1 class="pg-title">Terms and rules</h1><p class="pg-sub">The short version of how Fere works. By creating an account you agree to these rules.</p>' +
+      return '<div class="wrap scr col">' + backBtn() + '<h1 class="pg-title">Terms and rules</h1><p class="pg-sub">The short version of how Fere works. Fere is run by FERE NG LTD. By creating an account you agree to these rules.</p>' +
         sec('Payments and escrow', ['Posting a job is free. A client deposits the freelancer’s agreed price into escrow when they hire, before work starts.', 'Fere holds the money until the client approves the work. If the client doesn’t respond within 5 days of delivery, the money is released to the freelancer automatically.', 'Wallet top-ups are made by bank transfer to Fere and are added to your wallet once confirmed.', 'Withdrawals are paid to a Nigerian bank account in your own name, usually within 24 hours on working days.']) +
         sec('Fees', ['Clients pay a service fee when they hire. Freelancers pay a fee on what they earn. Each side sees its own fee before committing.', 'Fees may change. Any change is shown before you commit to a new job or proposal.']) +
         sec('Keep everything on Fere', ['Don’t ask for or share phone numbers, emails or payment details before a hire. They are hidden automatically.', 'Paying or being paid outside Fere removes your escrow protection and can get your account suspended.', 'Never pay anyone to apply for a job. Report it.']) +
@@ -911,10 +926,10 @@
     html: function () {
       function sec(t, items) { return '<section class="d-block"><h2 class="sub">' + t + '</h2><ul class="terms">' + items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></section>'; }
       var wa = S.me.support_whatsapp;
-      return '<div class="wrap scr col">' + backBtn() + '<h1 class="pg-title">Privacy policy</h1><p class="pg-sub">How Fere collects, uses and protects your personal data. Last updated 24 October 2026.</p>' +
+      return '<div class="wrap scr col">' + backBtn() + '<h1 class="pg-title">Privacy policy</h1><p class="pg-sub">How FERE NG LTD (“Fere”, “we”) collects, uses and protects your personal data. Last updated 25 October 2026.</p>' +
         sec('What we collect', ['Account details: your name, email address, phone number, city, and whether you hire or freelance.', 'Profile details you add: headline, category, skills, bio, starting price, business name and CV.', 'Your activity on Fere: jobs, proposals, messages, files you upload, reviews and reports.', 'Money records: wallet top-ups, payments held in escrow, fees, withdrawals, and the bank account you add for withdrawals.', 'One login cookie that keeps you signed in for up to 30 days. We don’t use advertising or tracking cookies.']) +
         sec('How we use it', ['To run your account and show your profile, jobs and proposals to the right people.', 'To hold payments in escrow, pay freelancers, make refunds and keep accurate records.', 'To keep Fere safe. Messages are checked automatically for phone numbers, emails, social handles and talk of paying outside Fere. Those details are hidden, and the message may be flagged for our team to review.', 'To settle disputes. When a dispute is opened, our team reads the chat and files for that contract.', 'To give support and tell you about important changes to your account.']) +
-        sec('Who can see what', ['Anyone can see a freelancer’s public profile: name, headline, city, skills, bio, rating and reviews.', 'Job posts show the client’s name or business name.', 'Only signed-in users can open a freelancer’s CV.', 'Proposals and their files are seen only by the client who posted the job.', 'Messages are seen only by the two people in the chat, and by our team when a message is flagged or a dispute is opened.', 'Your phone number, email address and bank details are never shown to other users.']) +
+        sec('Who can see what', ['Anyone can see a freelancer’s public profile: name, headline, city, skills, bio, rating and reviews.', 'Job posts show the client’s state, type of business and size, never their name. Freelancers see a client’s name only after the client messages or hires them.', 'A freelancer’s CV is seen only by clients they send a proposal to or chat with.', 'Proposals and their files are seen only by the client who posted the job.', 'Messages are seen only by the two people in the chat, and by our team when a message is flagged or a dispute is opened.', 'Your phone number, email address and bank details are never shown to other users.']) +
         sec('Who we share it with', ['We don’t sell your personal data.', 'Companies that run Fere for us, such as Cloudflare for hosting, the database and file storage. Pages also load fonts from Google Fonts. Some of this data may be stored on servers outside Nigeria.', 'Banks, to send withdrawals and refunds.', 'The police, courts or regulators, when the law requires it or to deal with fraud.']) +
         sec('How long we keep it', ['We keep your data while your account is open.', 'If you close your account, we delete or anonymise your profile. We keep payment, contract and dispute records for as long as the law and our accounts require.']) +
         sec('Keeping it safe', ['Passwords are stored scrambled (hashed), never as plain text.', 'The site uses an encrypted connection (HTTPS), and only a small team can use the admin tools.', 'If a data breach affects you, we will tell you and the regulator as the law requires.']) +
@@ -995,7 +1010,7 @@
     title: function () { return 'About Fere'; },
     load: pricingData,
     html: function () {
-      return '<div class="wrap scr pp">' + pageHead('About Fere', 'Freelance work Nigerians can trust', 'Fere means “work”. It’s a freelance marketplace for Nigeria. We help businesses find skilled freelancers for design, writing, websites, video, social media and admin work, and we help freelancers get paid safely for their skills.') +
+      return '<div class="wrap scr pp">' + pageHead('About Fere', 'Freelance work Nigerians can trust', 'Fere is a freelance marketplace for Nigeria. We help businesses find skilled freelancers for design, writing, websites, video, social media and admin work, and we help freelancers get paid safely for their skills.') +
         '<section class="pp-sec"><h2>Why we built Fere</h2><p>Hiring online in Nigeria often runs on trust alone. Clients pay upfront and hope the work arrives. Freelancers deliver and hope they get paid. Fere puts escrow in the middle: the client’s money is held safely until the work is approved, so both sides can get on with the job.</p></section>' +
         '<section class="pp-sec"><h2>What we stand for</h2><div class="pp-grid">' +
           '<div class="pp-card">' + ic('shield') + '<h3>Safe payments</h3><p>Every job is paid into escrow before work starts.</p></div>' +
@@ -1099,7 +1114,7 @@
   function footer() {
     var f = $('#foot'), on = !U();
     f.classList.toggle('foot-min', !on);
-    f.innerHTML = on ? '<div class="wrap foot"><p>© ' + new Date().getFullYear() + ' Fere · Freelance work and talent in Nigeria</p><p class="foot-links"><a class="link-btn" href="#/how">How it works</a><a class="link-btn" href="#/pricing">Pricing</a><a class="link-btn" href="#/about">About</a><a class="link-btn" href="#/help">Help</a><a class="link-btn" href="#/terms">Terms</a><a class="link-btn" href="#/privacy">Privacy</a></p></div>' : '';
+    f.innerHTML = on ? '<div class="wrap foot"><p>© ' + new Date().getFullYear() + ' FERE NG LTD · Freelance work and talent in Nigeria</p><p class="foot-links"><a class="link-btn" href="#/how">How it works</a><a class="link-btn" href="#/pricing">Pricing</a><a class="link-btn" href="#/about">About</a><a class="link-btn" href="#/help">Help</a><a class="link-btn" href="#/terms">Terms</a><a class="link-btn" href="#/privacy">Privacy</a></p></div>' : '';
   }
 
   /* ---------- modals ---------- */
