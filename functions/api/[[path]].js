@@ -1,5 +1,8 @@
 /* PadiHire API. Runs as a Cloudflare Pages Function at /api/*.
-   Needs a D1 binding named DB. Optional environment variable ADMIN_EMAILS (comma separated) marks admins. */
+   Needs a D1 binding named DB. Optional environment variables:
+   ADMIN_EMAILS (comma separated) marks admins.
+   RESEND_API_KEY + MAIL_FROM switch on email (password reset, verification, alerts). SITE_URL sets the link in emails.
+   TURNSTILE_SITEKEY + TURNSTILE_SECRET switch on the Cloudflare Turnstile check at sign-up. */
 
 const CATS = {
   design: 'Graphics & design', writing: 'Writing & translation', web: 'Web & app development',
@@ -50,7 +53,7 @@ export async function onRequest(ctx) {
       if (!ct.includes('application/json')) fail(415, 'Send JSON.');
       body = await request.json().catch(() => ({})) || {};
     }
-    const c = { req: request, env, db: env.DB, url, q: url.searchParams, body, user: null, set: null, cookies: [] };
+    const c = { req: request, env, db: env.DB, url, q: url.searchParams, body, user: null, set: null, cookies: [], wait: typeof ctx.waitUntil === 'function' ? ctx.waitUntil.bind(ctx) : null };
     c.user = await currentUser(c);
     await autoRelease(c);
     for (const [m, pat, h] of ROUTES) {
@@ -133,13 +136,98 @@ function normPhone(p) {
 }
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/* ---------- limits (spam and password guessing) ---------- */
+function ipOf(c) { return c.req.headers.get('cf-connecting-ip') || String(c.req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'; }
+/* If update-3.sql hasn't been run yet, limits are skipped instead of breaking log in. */
+async function blocked(c, k, max) {
+  try { const r = await c.db.prepare('SELECT n, reset_at FROM limits WHERE k = ?').bind(k).first(); return !!r && r.reset_at > now() && r.n >= max; }
+  catch (e) { console.error('limits table missing? run update-3.sql', e && e.message); return false; }
+}
+async function hit(c, k, win) {
+  const ts = now();
+  try { await c.db.prepare('INSERT INTO limits (k, n, reset_at) VALUES (?, 1, ?) ON CONFLICT(k) DO UPDATE SET n = CASE WHEN limits.reset_at <= ? THEN 1 ELSE limits.n + 1 END, reset_at = CASE WHEN limits.reset_at <= ? THEN excluded.reset_at ELSE limits.reset_at END').bind(k, ts + win, ts, ts).run(); }
+  catch (e) { console.error('limits table missing? run update-3.sql', e && e.message); }
+}
+async function limit(c, k, max, win) { if (await blocked(c, k, max)) return false; await hit(c, k, win); return true; }
+async function human(c, token) {
+  if (!c.env.TURNSTILE_SECRET) return true;
+  if (!token) return false;
+  const fd = new FormData();
+  fd.append('secret', c.env.TURNSTILE_SECRET); fd.append('response', String(token).slice(0, 2048)); fd.append('remoteip', ipOf(c));
+  const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: fd }).catch(() => null);
+  if (!r) return false;
+  const d = await r.json().catch(() => ({}));
+  return !!d.success;
+}
+
+/* ---------- email (Resend) ---------- */
+function mailOn(c) { return !!(c.env.RESEND_API_KEY && c.env.MAIL_FROM); }
+function site(c) { return String(c.env.SITE_URL || c.url.origin).replace(/\/+$/, ''); }
+function later(c, p) { const q = Promise.resolve(p).catch((e) => console.error('background', e && e.stack || e)); if (c.wait) c.wait(q); return q; }
+const escH = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+function mailHtml(heading, paras, btn, foot) {
+  const p = paras.map((x) => '<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a1625">' + escH(x) + '</p>').join('');
+  const b = btn ? '<p style="margin:22px 0 6px"><a href="' + escH(btn.url) + '" style="display:inline-block;background:#5b21b6;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 20px;border-radius:10px">' + escH(btn.label) + '</a></p><p style="margin:12px 0 0;font-size:12.5px;line-height:1.5;color:#625c70;word-break:break-all">If the button doesn’t work, open this link: ' + escH(btn.url) + '</p>' : '';
+  const f = foot === 'alerts' ? 'You get these emails because you have a PadiHire account. To stop emails about messages and proposals, go to Me › Email alerts.' : 'You get this email because of your PadiHire account. If this wasn’t you, you can ignore it.';
+  return '<!doctype html><html><body style="margin:0;padding:0;background:#f6f4fa;font-family:Arial,Helvetica,sans-serif"><div style="max-width:560px;margin:0 auto;padding:24px 16px">' +
+    '<div style="background:#5b21b6;border-radius:14px 14px 0 0;padding:16px 22px;color:#ffffff;font-size:20px;font-weight:800">Padi<span style="color:#c4b5fd">Hire</span></div>' +
+    '<div style="background:#ffffff;border-radius:0 0 14px 14px;padding:24px 22px"><h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1a1625">' + escH(heading) + '</h1>' + p + b + '</div>' +
+    '<p style="margin:16px 4px 0;font-size:12px;line-height:1.5;color:#625c70">' + escH(f) + '</p></div></body></html>';
+}
+async function sendMail(c, to, subject, heading, paras, btn, foot) {
+  if (!mailOn(c) || !to) return false;
+  const text = paras.join('\n\n') + (btn ? '\n\n' + btn.label + ': ' + btn.url : '') + '\n\nPadiHire';
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + c.env.RESEND_API_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ from: c.env.MAIL_FROM, to: [to], subject, html: mailHtml(heading, paras, btn, foot), text })
+  }).catch((e) => { console.error('mail', e); return null; });
+  if (!r || !r.ok) { if (r) console.error('mail failed', r.status, (await r.text().catch(() => '')).slice(0, 300)); return false; }
+  return true;
+}
+/* Email a user about something that happened. money: always send (payments and contracts).
+   Otherwise respect the user's email alerts switch. key/every: at most one email per key in that many seconds. */
+function notify(c, uid, subject, paras, path, label, opts) {
+  opts = opts || {};
+  if (!mailOn(c) || !uid) return null;
+  return later(c, (async () => {
+    const u = await c.db.prepare('SELECT id, name, email, email_alerts, status FROM users WHERE id = ?').bind(uid).first();
+    if (!u || u.status !== 'active' || !u.email) return;
+    if (!opts.money && !u.email_alerts) return;
+    if (opts.key && !(await limit(c, 'mail:' + uid + ':' + opts.key, 1, opts.every || 1800))) return;
+    await sendMail(c, u.email, subject, subject, ['Hi ' + String(u.name).split(' ')[0] + ','].concat(paras), path ? { label: label || 'Open PadiHire', url: site(c) + '/#/' + path } : null, opts.money ? 'account' : 'alerts');
+  })());
+}
+async function makeToken(c, uid, kind, ttl) {
+  const raw = hex(crypto.getRandomValues(new Uint8Array(24))), ts = now();
+  await c.db.batch([
+    c.db.prepare('DELETE FROM tokens WHERE user_id = ? AND kind = ?').bind(uid, kind),
+    c.db.prepare('INSERT INTO tokens (user_id, kind, hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)').bind(uid, kind, await sha256(raw), ts + ttl, ts)
+  ]);
+  return raw;
+}
+async function useToken(c, raw, kind) {
+  if (!/^[0-9a-f]{48}$/.test(String(raw || ''))) return null;
+  const t = await c.db.prepare('SELECT * FROM tokens WHERE hash = ? AND kind = ?').bind(await sha256(String(raw)), kind).first();
+  if (!t || t.expires_at < now()) return null;
+  const r = await c.db.prepare('DELETE FROM tokens WHERE id = ?').bind(t.id).run();
+  return r.meta.changes ? t : null;
+}
+async function sendVerify(c, u) {
+  const raw = await makeToken(c, u.id, 'verify', 7 * DAY);
+  return sendMail(c, u.email, 'Confirm your email for PadiHire', 'Confirm your email',
+    ['Hi ' + String(u.name).split(' ')[0] + ',', 'Welcome to PadiHire. Tap the button below to confirm this is your email address. It keeps your account safe and makes sure you get alerts about your jobs and payments.'],
+    { label: 'Confirm my email', url: site(c) + '/#/verify/' + raw }, 'account');
+}
+
 function selfView(u) {
   return {
     id: u.id, name: u.name, email: u.email, phone: u.phone, city: u.city, role: u.role, title: u.title, cat: u.cat,
     skills: parseList(u.skills), about: u.about, rate_from: u.rate_from, business: u.business, verified: !!u.verified,
     rating: u.rating_count ? +(u.rating_sum / u.rating_count).toFixed(1) : 0, reviews: u.rating_count, jobs_done: u.jobs_done,
     bank: { name: u.bank_name, acct: u.bank_acct, holder: u.bank_holder }, created_at: u.created_at,
-    cv: u.cv_file ? { id: u.cv_file, name: u.cv_name } : null
+    cv: u.cv_file ? { id: u.cv_file, name: u.cv_name } : null,
+    email_verified: !!u.email_verified, email_alerts: u.email_alerts !== 0
   };
 }
 function parseList(v) { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
@@ -196,7 +284,10 @@ on('POST', 'auth/signup', async (c) => {
   if (!phone) errors.phone = 'Enter a Nigerian phone number, like 0803 123 4567.';
   if (pass.length < 8) errors.password = 'Use at least 8 characters.';
   if (role === 'fre' && !CATS[b.cat]) errors.cat = 'Choose the kind of work you do.';
+  if (b.adult !== true) errors.adult = 'You must be 18 or older to use PadiHire.';
   if (Object.keys(errors).length) fail(400, 'Please fix the highlighted fields.', { fields: errors });
+  if (!(await human(c, b.cf_token))) fail(400, 'Please complete the check that you’re human, then try again.', { fields: { human: 'Complete this check.' } });
+  if (!(await limit(c, 'su:' + ipOf(c), 10, 3600))) fail(429, 'Too many new accounts from this network. Please try again in an hour.');
   const cat = role === 'fre' ? b.cat : '';
   const title = role === 'fre' ? (scrub(str(b.title, 80)).text || CATS[cat]) : '';
   const skills = '[]';
@@ -204,6 +295,7 @@ on('POST', 'auth/signup', async (c) => {
     const r = await c.db.prepare('INSERT INTO users (name, email, phone, pass_hash, city, role, title, cat, skills, business, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .bind(name, email, phone, await hashPass(pass), str(b.city, 40), role, title, cat, skills, role === 'cli' ? scrub(str(b.business, 80)).text : '', now()).run();
     await startSession(c, r.meta.last_row_id);
+    if (mailOn(c)) later(c, sendVerify(c, { id: r.meta.last_row_id, name, email }));
   } catch (e) {
     if (isUnique(e)) {
       const dupe = await c.db.prepare('SELECT email FROM users WHERE email = ?').bind(email).first();
@@ -218,11 +310,70 @@ on('POST', 'auth/login', async (c) => {
   const login = str(c.body.login, 120), pass = String(c.body.password || '');
   const byEmail = login.indexOf('@') >= 0;
   const key = byEmail ? login.toLowerCase() : normPhone(login);
+  const ip = ipOf(c);
+  if ((key && await blocked(c, 'lf:' + key, 8)) || await blocked(c, 'lfip:' + ip, 50)) fail(429, 'Too many wrong tries. Wait 15 minutes, or reset your password.');
   const u = key ? await c.db.prepare('SELECT * FROM users WHERE ' + (byEmail ? 'email' : 'phone') + ' = ?').bind(key).first() : null;
-  if (!u || !(await checkPass(pass, u.pass_hash))) fail(401, 'Wrong email, phone number or password.');
+  if (!u || !(await checkPass(pass, u.pass_hash))) {
+    await hit(c, 'lfip:' + ip, 900);
+    if (key) await hit(c, 'lf:' + key, 900);
+    fail(401, 'Wrong email, phone number or password.');
+  }
   if (u.status !== 'active') fail(403, 'Your account is suspended. Please contact support.');
+  await c.db.prepare('DELETE FROM limits WHERE k = ?').bind('lf:' + key).run().catch(() => null);
   await startSession(c, u.id);
   return { ok: true };
+});
+
+on('POST', 'auth/forgot', async (c) => {
+  const login = str(c.body.login, 120), byEmail = login.indexOf('@') >= 0, key = byEmail ? login.toLowerCase() : normPhone(login);
+  if (!key) fail(400, 'Enter the email or phone number on your account.', { fields: { login: 'Enter your email or phone number.' } });
+  if (!mailOn(c)) fail(503, 'Password reset by email isn’t switched on yet. Message PadiHire support on WhatsApp to reset your password.');
+  if (!(await limit(c, 'fgip:' + ipOf(c), 20, 3600)) || !(await limit(c, 'fg:' + key, 3, 3600))) fail(429, 'Too many reset requests. Check your email, or try again in an hour.');
+  const u = await c.db.prepare('SELECT id, name, email, status FROM users WHERE ' + (byEmail ? 'email' : 'phone') + ' = ?').bind(key).first();
+  if (u && u.status === 'active' && await limit(c, 'fgu:' + u.id, 3, 3600)) {
+    later(c, (async () => {
+      const raw = await makeToken(c, u.id, 'reset', 3600);
+      await sendMail(c, u.email, 'Reset your PadiHire password', 'Reset your password',
+        ['Hi ' + String(u.name).split(' ')[0] + ',', 'Someone asked to reset the password for your PadiHire account. Tap the button below to choose a new one. The link works for 1 hour.', 'If you didn’t ask for this, ignore this email. Your password stays the same.'],
+        { label: 'Choose a new password', url: site(c) + '/#/reset/' + raw }, 'account');
+    })());
+  }
+  return { ok: true };
+});
+on('POST', 'auth/reset', async (c) => {
+  const pw = String(c.body.password || '');
+  if (pw.length < 8) fail(400, 'Use at least 8 characters.', { fields: { password: 'Use at least 8 characters.' } });
+  const t = await useToken(c, c.body.token, 'reset');
+  if (!t) fail(400, 'This reset link has expired or was already used. Ask for a new one.');
+  const u = await c.db.prepare('SELECT id, email, phone, status FROM users WHERE id = ?').bind(t.user_id).first();
+  if (!u) fail(400, 'This reset link has expired or was already used. Ask for a new one.');
+  await c.db.batch([
+    c.db.prepare('UPDATE users SET pass_hash = ?, email_verified = 1 WHERE id = ?').bind(await hashPass(pw), u.id),
+    c.db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(u.id),
+    c.db.prepare('DELETE FROM limits WHERE k = ? OR k = ?').bind('lf:' + u.email, 'lf:' + u.phone)
+  ]);
+  if (u.status !== 'active') fail(403, 'Your password was changed, but your account is suspended. Please contact support.');
+  await startSession(c, u.id);
+  return { ok: true };
+});
+on('POST', 'auth/verify', async (c) => {
+  const t = await useToken(c, c.body.token, 'verify');
+  if (!t) fail(400, 'This link has expired or was already used. Log in and ask for a new one.');
+  await c.db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').bind(t.user_id).run();
+  return { ok: true };
+});
+on('POST', 'me/verify', async (c) => {
+  const u = need(c);
+  if (u.email_verified) return { ok: true, already: true };
+  if (!mailOn(c)) fail(503, 'Email isn’t switched on yet.');
+  if (!(await limit(c, 'vr:' + u.id, 3, 3600))) fail(429, 'We’ve sent a few emails already. Check your inbox and spam folder, or try again in an hour.');
+  await sendVerify(c, u);
+  return { ok: true };
+});
+on('POST', 'me/alerts', async (c) => {
+  const u = need(c), v = c.body.on ? 1 : 0;
+  await c.db.prepare('UPDATE users SET email_alerts = ? WHERE id = ?').bind(v, u.id).run();
+  return { ok: true, on: !!v };
 });
 
 on('POST', 'auth/logout', async (c) => {
@@ -251,7 +402,7 @@ async function walletNums(c, uid) {
 }
 on('GET', 'me', async (c) => {
   const s = await settings(c);
-  if (!c.user) return { user: null, support_whatsapp: s.support_whatsapp };
+  if (!c.user) return { user: null, support_whatsapp: s.support_whatsapp, mail: mailOn(c), turnstile: c.env.TURNSTILE_SECRET ? String(c.env.TURNSTILE_SITEKEY || '') : '' };
   const u = c.user, cli = u.role === 'cli';
   const [unread, waiting, active, other] = await c.db.batch([
     c.db.prepare('SELECT COALESCE(SUM(' + (cli ? 'client_unread' : 'fre_unread') + '), 0) AS n FROM threads WHERE ' + (cli ? 'client_id' : 'fre_id') + ' = ?').bind(u.id),
@@ -261,7 +412,7 @@ on('GET', 'me', async (c) => {
   ]);
   const w = await walletNums(c, u.id);
   return {
-    user: selfView(u), is_admin: !!u.is_admin, support_whatsapp: s.support_whatsapp, uploads: !!c.env.FILES,
+    user: selfView(u), is_admin: !!u.is_admin, support_whatsapp: s.support_whatsapp, uploads: !!c.env.FILES, mail: mailOn(c),
     wallet: { avail: u.avail, escrow_out: w.escrow_out, escrow_in: w.escrow_in },
     unread: unread.results[0].n, unread_other: other.results[0].n, waiting: waiting.results[0].n, active: active.results[0].n,
     fee: cli ? { client_fee_pct: s.client_fee_pct } : { fre_fee_pct: s.fre_fee_pct, monthly_proposals: s.monthly_proposals }
@@ -447,6 +598,7 @@ on('POST', 'jobs/:id/apply', async (c, p) => {
     ].concat(fids.length ? [attachStmt(c, fids, 'proposal', '(SELECT id FROM proposals WHERE job_id = ' + j.id + ' AND fre_id = ' + u.id + ')')] : [])
       .concat(sn.hit ? [flagStmt(c, 'proposal', j.id, rawNote, sn.reasons)] : []));
   } catch (e) { if (isUnique(e)) fail(409, 'You already sent a proposal for this job.'); throw e; }
+  notify(c, j.client_id, 'New proposal for “' + j.title + '”', [u.name + ' sent a proposal: ' + naira(price) + ', delivered in ' + days + (days === 1 ? ' day.' : ' days.'), 'Compare proposals and chat with freelancers before you hire. You only pay when you hire.'], 'myjob/' + j.id, 'See proposals', { key: 'prop:' + j.id, every: 3600 });
   return { ok: true, left: s.monthly_proposals - used.n - 1, masked: sn.hit };
 });
 on('GET', 'proposals', async (c) => {
@@ -506,7 +658,43 @@ on('GET', 'freelancers/:id', async (c, p) => {
   const reviews = (await c.db.prepare('SELECT r.stars, r.note, r.created_at, u.name, u.business, c.title FROM reviews r JOIN users u ON u.id = r.client_id JOIN contracts c ON c.id = r.contract_id WHERE r.fre_id = ? ORDER BY r.id DESC LIMIT 10').bind(r.id).all()).results;
   const pv = proView(r);
   pv.cv = r.cv_file ? (c.user ? { id: r.cv_file, name: r.cv_name } : { locked: true }) : null;
-  return { freelancer: pv, reviews: reviews.map((x) => ({ stars: x.stars, note: x.note, created_at: x.created_at, client: x.business || x.name, title: x.title })) };
+  return { portfolio: await portfolioOf(c, r.id), freelancer: pv, reviews: reviews.map((x) => ({ stars: x.stars, note: x.note, created_at: x.created_at, client: x.business || x.name, title: x.title })) };
+});
+
+/* ---------- portfolio ---------- */
+async function portfolioOf(c, uid) { return (await c.db.prepare('SELECT id, file_id, title, link FROM portfolio WHERE user_id = ? ORDER BY id DESC LIMIT 12').bind(uid).all()).results || []; }
+on('GET', 'me/portfolio', async (c) => { const u = need(c); return { items: await portfolioOf(c, u.id) }; });
+on('POST', 'me/portfolio', async (c) => {
+  const u = need(c), b = c.body;
+  if (!u.cat) fail(400, 'Set up your freelancer profile first.');
+  const title = str(b.title, 60), linkRaw = str(b.link, 300), fields = {};
+  if (title.length < 2) fields.title = 'Give this work a short title.';
+  else if (scrub(title).hit) fields.title = 'Remove contact details from the title.';
+  let link = '';
+  if (linkRaw) {
+    if (!/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(linkRaw)) fields.link = 'Enter a full link that starts with https://';
+    else if (scrub(linkRaw).hit) fields.link = 'Links to WhatsApp, Telegram or contact pages aren’t allowed.';
+    else link = linkRaw;
+  }
+  const fid = int(b.file_id);
+  const f = fid ? await c.db.prepare("SELECT id FROM files WHERE id = ? AND user_id = ? AND kind = 'portfolio' AND scope = 'pending'").bind(fid, u.id).first() : null;
+  if (!f) fields.file = 'Add a picture of your work.';
+  if (Object.keys(fields).length) fail(400, 'Please fix the highlighted fields.', { fields });
+  const n = await c.db.prepare('SELECT COUNT(*) AS n FROM portfolio WHERE user_id = ?').bind(u.id).first();
+  if (n.n >= 8) fail(400, 'You can show up to 8 pieces of work. Remove one to add another.');
+  const r = await c.db.prepare('INSERT INTO portfolio (user_id, file_id, title, link, created_at) VALUES (?, ?, ?, ?, ?)').bind(u.id, f.id, title, link, now()).run();
+  await c.db.prepare("UPDATE files SET scope = 'portfolio', ref_id = ? WHERE id = ?").bind(r.meta.last_row_id, f.id).run();
+  return { ok: true, items: await portfolioOf(c, u.id) };
+});
+on('POST', 'me/portfolio/:id/delete', async (c, p) => {
+  const u = need(c);
+  const it = await c.db.prepare('SELECT * FROM portfolio WHERE id = ? AND user_id = ?').bind(int(p.id), u.id).first();
+  if (!it) fail(404, 'Not found.');
+  await c.db.batch([
+    c.db.prepare('DELETE FROM portfolio WHERE id = ?').bind(it.id),
+    c.db.prepare("UPDATE files SET scope = 'old' WHERE id = ?").bind(it.file_id)
+  ]);
+  return { ok: true, items: await portfolioOf(c, u.id) };
 });
 
 /* ---------- chat ---------- */
@@ -591,6 +779,7 @@ on('POST', 'threads/:id/messages', async (c, p) => {
   if (fids.length) stmts.push(attachStmt(c, fids, 'message', '(SELECT MAX(id) FROM messages WHERE thread_id = ' + t.id + ' AND sender_id = ' + u.id + ')'));
   if (sc.hit) stmts.push(flagStmt(c, 'message', t.id, raw, sc.reasons));
   const r = await c.db.batch(stmts);
+  notify(c, t.side === 'fre' ? t.client_id : t.fre_id, 'New message from ' + (t.side === 'client' ? display(u) : u.name), ['“' + preview.slice(0, 220) + '”', 'About the job: ' + t.job_title], 'chat/' + t.id, 'Reply', { key: 'msg:' + t.id, every: 1800 });
   return { ok: true, id: r[0].meta.last_row_id, masked: sc.hit };
 });
 
@@ -623,6 +812,7 @@ on('POST', 'hire', async (c) => {
     throw e;
   }
   const k = await c.db.prepare('SELECT id FROM contracts WHERE job_id = ?').bind(pr.job_id).first();
+  notify(c, pr.fre_id, 'You’re hired: “' + pr.title + '”', [display(u) + ' hired you for ' + naira(pr.price) + '. The money is held safely in escrow until the work is approved.', 'Start now and deliver the work in the chat within ' + pr.days + (pr.days === 1 ? ' day.' : ' days.')], 'chat/' + t.id, 'Open the job', { money: true });
   return { ok: true, contract_id: k.id, thread_id: t.id };
 });
 async function contractFor(c, id) {
@@ -647,6 +837,7 @@ async function release(c, k, byAdmin) {
     c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, info, ref, created_at) VALUES (?, ?, ?, 0, ?, ?, ?)').bind(k.client_id, 'release', 'Released to ' + f.name + ' · ' + k.title, k.amount, 'release-c:' + k.id, ts)
   ].concat(await sysMessage(c, t, text, 1, 1));
   try { await c.db.batch(stmts); } catch (e) { if (isUnique(e)) fail(409, 'This payment was already released.'); throw e; }
+  notify(c, k.fre_id, 'You’ve been paid for “' + k.title + '”', [naira(net) + ' is now in your PadiHire wallet' + (byAdmin === 'auto' ? ', released automatically after the review period.' : '.'), 'You can withdraw it to your bank from your wallet.'], 'wallet', 'Go to wallet', { money: true });
 }
 let lastAuto = 0;
 async function autoRelease(c) {
@@ -654,6 +845,7 @@ async function autoRelease(c) {
   lastAuto = Date.now();
   try {
     const s = await settings(c);
+    await c.db.batch([c.db.prepare('DELETE FROM limits WHERE reset_at < ?').bind(now() - 60), c.db.prepare('DELETE FROM tokens WHERE expires_at < ?').bind(now())]);
     const due = (await c.db.prepare("SELECT * FROM contracts WHERE stage = 'delivered' AND delivered_at < ? LIMIT 10").bind(now() - s.auto_release_days * DAY).all()).results;
     for (const k of due) { try { await release(c, k, 'auto'); } catch (e) { /* already handled */ } }
   } catch (e) { console.error('auto release', e); }
@@ -674,6 +866,8 @@ on('POST', 'contracts/:id/deliver', async (c, p) => {
     c.db.prepare('INSERT INTO messages (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)').bind(k.thread_id, u.id, 'Delivered: ' + note, ts),
     c.db.prepare('UPDATE threads SET last_at = ?, last_text = ?, last_sender = ?, client_unread = client_unread + 1 WHERE id = ?').bind(ts, ('Delivered: ' + note).slice(0, 140), u.id, t.id)
   ].concat(sn.hit ? [flagStmt(c, 'message', k.thread_id, c.body.note, sn.reasons)] : []));
+  const s = await settings(c);
+  notify(c, k.client_id, u.name + ' delivered “' + k.title + '”', ['Check the work in the chat. If you’re happy, approve it to release the payment, or ask for changes.', 'If you don’t respond within ' + s.auto_release_days + ' days, the payment is released automatically.'], 'chat/' + k.thread_id, 'Check the work', { money: true });
   return { ok: true, masked: sn.hit };
 });
 on('POST', 'contracts/:id/changes', async (c, p) => {
@@ -687,6 +881,7 @@ on('POST', 'contracts/:id/changes', async (c, p) => {
     c.db.prepare('INSERT INTO messages (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)').bind(k.thread_id, u.id, 'Changes requested: ' + note, ts),
     c.db.prepare('UPDATE threads SET last_at = ?, last_text = ?, last_sender = ?, fre_unread = fre_unread + 1 WHERE id = ?').bind(ts, ('Changes requested: ' + note).slice(0, 140), u.id, k.thread_id)
   ].concat(sn.hit ? [flagStmt(c, 'message', k.thread_id, c.body.note, sn.reasons)] : []));
+  notify(c, k.fre_id, 'Changes requested on “' + k.title + '”', [display(u) + ' asked for changes:', '“' + note.slice(0, 400) + '”'], 'chat/' + k.thread_id, 'Open the chat', { money: true });
   return { ok: true, masked: sn.hit };
 });
 on('POST', 'contracts/:id/approve', async (c, p) => {
@@ -706,6 +901,7 @@ on('POST', 'contracts/:id/dispute', async (c, p) => {
   await c.db.batch([
     c.db.prepare("UPDATE contracts SET stage = 'disputed', dispute_by = ?, dispute_reason = ? WHERE id = ? AND stage IN ('active','delivered')").bind(u.id, reason, k.id)
   ].concat(await sysMessage(c, { id: k.thread_id }, text, isClient ? 0 : 1, isClient ? 1 : 0)));
+  notify(c, isClient ? k.fre_id : k.client_id, 'Dispute opened on “' + k.title + '”', [u.name + ' opened a dispute: “' + reason + '”', 'The money stays in escrow. PadiHire will read the chat and decide. Add anything that helps your side in the chat.'], 'chat/' + k.thread_id, 'Open the chat', { money: true });
   return { ok: true };
 });
 on('POST', 'contracts/:id/review', async (c, p) => {
@@ -814,12 +1010,16 @@ on('POST', 'admin/topups/:id/confirm', async (c, p) => {
       c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(t.user_id, 'topup', 'Top-up by bank transfer · ' + t.ref, amount, 'topup:' + t.id, ts)
     ]);
   } catch (e) { if (isUnique(e)) fail(409, 'This top-up was already confirmed.'); throw e; }
+  notify(c, t.user_id, 'Top-up confirmed: ' + naira(amount), ['We received your transfer. ' + naira(amount) + ' is now in your PadiHire wallet.'], 'wallet', 'Go to wallet', { money: true });
   return { ok: true };
 });
 on('POST', 'admin/topups/:id/reject', async (c, p) => {
   needAdmin(c);
-  const r = await c.db.prepare("UPDATE topups SET status = 'rejected', note = ?, decided_at = ? WHERE id = ? AND status = 'pending'").bind(str(c.body.note, 200) || 'Transfer not found', now(), int(p.id)).run();
+  const note = str(c.body.note, 200) || 'Transfer not found';
+  const r = await c.db.prepare("UPDATE topups SET status = 'rejected', note = ?, decided_at = ? WHERE id = ? AND status = 'pending'").bind(note, now(), int(p.id)).run();
   if (!r.meta.changes) fail(400, 'This top-up was already handled.');
+  const t = await c.db.prepare('SELECT user_id, amount, ref FROM topups WHERE id = ?').bind(int(p.id)).first();
+  if (t) notify(c, t.user_id, 'We couldn’t confirm your transfer', ['We couldn’t confirm your transfer of ' + naira(t.amount) + ' (reference ' + t.ref + '). Reason: ' + note + '.', 'If you sent it, message PadiHire support with your receipt.'], 'wallet', 'Go to wallet', { money: true });
   return { ok: true };
 });
 on('GET', 'admin/withdrawals', async (c) => {
@@ -832,6 +1032,8 @@ on('POST', 'admin/withdrawals/:id/paid', async (c, p) => {
   needAdmin(c);
   const r = await c.db.prepare("UPDATE withdrawals SET status = 'paid', note = ?, decided_at = ? WHERE id = ? AND status = 'pending'").bind(str(c.body.note, 200), now(), int(p.id)).run();
   if (!r.meta.changes) fail(400, 'This withdrawal was already handled.');
+  const w = await c.db.prepare('SELECT user_id, amount FROM withdrawals WHERE id = ?').bind(int(p.id)).first();
+  if (w) notify(c, w.user_id, 'Withdrawal paid: ' + naira(w.amount), ['We’ve sent ' + naira(w.amount) + ' to your bank account. It can take a little while to show in your bank app.'], 'wallet', 'See your wallet', { money: true });
   return { ok: true };
 });
 on('POST', 'admin/withdrawals/:id/reject', async (c, p) => {
@@ -846,6 +1048,7 @@ on('POST', 'admin/withdrawals/:id/reject', async (c, p) => {
       c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(w.user_id, 'withdraw_back', 'Withdrawal returned: ' + note, w.amount, 'wdback:' + w.id, ts)
     ]);
   } catch (e) { if (isUnique(e)) fail(409, 'This withdrawal was already returned.'); throw e; }
+  notify(c, w.user_id, 'Withdrawal returned to your wallet', [naira(w.amount) + ' is back in your PadiHire wallet. Reason: ' + note + '.', 'Check your bank details, then try again.'], 'wallet', 'Go to wallet', { money: true });
   return { ok: true };
 });
 on('GET', 'admin/disputes', async (c) => {
@@ -873,6 +1076,8 @@ on('POST', 'admin/contracts/:id/refund', async (c, p) => {
       c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(k.client_id, 'refund', 'Refund · ' + k.title + (withFee ? ' (with service fee)' : ''), back, 'refund:' + k.id, ts)
     ].concat(await sysMessage(c, { id: k.thread_id }, text, 1, 1)));
   } catch (e) { if (isUnique(e)) fail(409, 'This contract was already refunded.'); throw e; }
+  notify(c, k.client_id, 'Refund for “' + k.title + '”', ['PadiHire reviewed this contract. ' + naira(back) + ' is back in your PadiHire wallet.'], 'wallet', 'Go to wallet', { money: true });
+  notify(c, k.fre_id, 'Contract closed: “' + k.title + '”', ['PadiHire reviewed this contract and refunded the client. The contract is now closed.'], 'chat/' + k.thread_id, 'Open the chat', { money: true });
   return { ok: true };
 });
 on('GET', 'admin/threads/:id', async (c, p) => {
@@ -977,14 +1182,15 @@ on('POST', 'files', async (c) => {
   const u = need(c);
   if (!c.env.FILES) fail(503, 'File uploads aren’t switched on yet.');
   const kind = c.q.get('kind');
-  if (['cv', 'proposal', 'message'].indexOf(kind) < 0) bad('Unknown upload.');
+  if (['cv', 'proposal', 'message', 'portfolio'].indexOf(kind) < 0) bad('Unknown upload.');
   let name = '';
   try { name = decodeURIComponent(c.req.headers.get('x-file-name') || ''); } catch (e) { name = ''; }
   name = name.replace(/[\u0000-\u001f\\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(-120) || 'file';
   const ext = ((name.match(/\.([a-z0-9]{1,5})$/i) || [])[1] || '').toLowerCase();
   if (!FILE_TYPES[ext]) fail(415, 'That file type isn’t allowed. Use PDF, Word, Excel, PowerPoint, images, ZIP or MP4.');
   if (kind === 'cv' && ['pdf', 'doc', 'docx'].indexOf(ext) < 0) fail(415, 'Upload your CV as a PDF or Word file.');
-  const max = kind === 'cv' ? 5 * 1048576 : 20 * 1048576;
+  if (kind === 'portfolio' && ['png', 'jpg', 'jpeg', 'webp', 'gif'].indexOf(ext) < 0) fail(415, 'Use a picture: JPG, PNG, WebP or GIF.');
+  const max = kind === 'cv' || kind === 'portfolio' ? 5 * 1048576 : 20 * 1048576;
   if (int(c.req.headers.get('content-length')) > max) fail(413, 'That file is too big. The limit is ' + (max / 1048576) + ' MB.');
   const recent = await c.db.prepare('SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND created_at > ?').bind(u.id, now() - DAY).first();
   if (recent.n >= 80) fail(429, 'You’ve uploaded a lot today. Try again tomorrow.');
@@ -1011,10 +1217,9 @@ async function canRead(c, f) {
   return false;
 }
 on('GET', 'files/:id', async (c, p) => {
-  need(c);
   if (!c.env.FILES) fail(503, 'File uploads aren’t switched on yet.');
   const f = await c.db.prepare('SELECT * FROM files WHERE id = ?').bind(int(p.id)).first();
-  if (!f || !(await canRead(c, f))) fail(404, 'File not found.');
+  if (!f || f.scope !== 'portfolio') { need(c); if (!f || !(await canRead(c, f))) fail(404, 'File not found.'); }
   const obj = await c.env.FILES.get(f.key);
   if (!obj) fail(404, 'File not found.');
   const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, "'");
@@ -1022,7 +1227,7 @@ on('GET', 'files/:id', async (c, p) => {
     headers: {
       'content-type': f.type,
       'content-disposition': (SHOWABLE.test(f.type) ? 'inline' : 'attachment') + '; filename="' + ascii + '"; filename*=UTF-8\'\'' + encodeURIComponent(f.name),
-      'cache-control': 'private, max-age=3600',
+      'cache-control': f.scope === 'portfolio' ? 'public, max-age=86400' : 'private, max-age=3600',
       'x-content-type-options': 'nosniff'
     }
   });
