@@ -440,6 +440,11 @@ on('GET', 'me', async (c) => {
     fee: cli ? { client_fee_pct: s.client_fee_pct } : { fre_fee_pct: s.fre_fee_pct, monthly_proposals: s.monthly_proposals }
   };
 });
+/* Public numbers for the Pricing and How it works pages. */
+on('GET', 'pricing', async (c) => {
+  const s = await settings(c);
+  return { client_fee_pct: s.client_fee_pct, fre_fee_pct: s.fre_fee_pct, monthly_proposals: s.monthly_proposals, auto_release_days: s.auto_release_days, support_whatsapp: s.support_whatsapp };
+});
 on('POST', 'me/role', async (c) => {
   const u = need(c), role = c.body.role === 'cli' ? 'cli' : 'fre';
   await c.db.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, u.id).run();
