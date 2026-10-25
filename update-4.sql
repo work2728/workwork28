@@ -1,0 +1,4 @@
+-- PadiHire update 4: locations are now Nigerian states (36 states + FCT) instead of cities.
+-- Run this ONCE in Cloudflare: Workers & Pages > D1 > padihire > Console. Paste everything and press Execute.
+UPDATE users SET city = CASE city WHEN 'Abuja' THEN 'FCT (Abuja)' WHEN 'Port Harcourt' THEN 'Rivers' WHEN 'Ibadan' THEN 'Oyo' WHEN 'Benin City' THEN 'Edo' WHEN 'Uyo' THEN 'Akwa Ibom' WHEN 'Owerri' THEN 'Imo' WHEN 'Abeokuta' THEN 'Ogun' WHEN 'Jos' THEN 'Plateau' WHEN 'Ilorin' THEN 'Kwara' WHEN 'Warri' THEN 'Delta' WHEN 'Other' THEN '' ELSE city END;
+UPDATE jobs SET city = CASE city WHEN 'Abuja' THEN 'FCT (Abuja)' WHEN 'Port Harcourt' THEN 'Rivers' WHEN 'Ibadan' THEN 'Oyo' WHEN 'Benin City' THEN 'Edo' WHEN 'Uyo' THEN 'Akwa Ibom' WHEN 'Owerri' THEN 'Imo' WHEN 'Abeokuta' THEN 'Ogun' WHEN 'Jos' THEN 'Plateau' WHEN 'Ilorin' THEN 'Kwara' WHEN 'Warri' THEN 'Delta' WHEN 'Other' THEN '' ELSE city END;
