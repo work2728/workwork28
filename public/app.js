@@ -108,7 +108,7 @@
       (p.about ? '<p class="fr-about">' + esc(p.about) + '</p>' : '') + (p.skills.length ? '<ul class="chips">' + p.skills.map(li).join('') + '</ul>' : '') + '</article>';
   }
   function catOptions(any) { return '<option value="">' + (any || 'All categories') + '</option>' + CATS.map(function (c) { return '<option value="' + c.id + '">' + esc(c.label) + '</option>'; }).join(''); }
-  function cityOptions(any, remote) { return (any ? '<option value="">' + any + '</option>' : '') + (remote ? '<option value="Remote">' + remote + '</option>' : '') + CITIES.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '<option>Other</option>'; }
+  function cityOptions(any, remote) { return (any ? '<option value="">' + any + '</option>' : '') + (remote ? '<option value="Remote">' + remote + '</option>' : '') + CITIES.map(function (c) { return '<option>' + c + '</option>'; }).join(''); }
   function promo(title, body, btn, r) { return '<div class="promo"><div><h2>' + title + '</h2><p>' + body + '</p></div><button type="button" class="btn btn-dark" data-act="join" data-v="' + r + '">' + btn + '</button></div>'; }
   function sideBox(title, body, link) { return '<section class="side-box">' + (title ? '<h2 class="sb-h">' + title + '</h2>' : '') + body + (link || '') + '</section>'; }
 
@@ -169,6 +169,32 @@
       : '<p class="att-chip">' + ic('file') + '<span>' + esc(cv.name) + '</span>' + (cv.id ? '<a class="link-btn small-link" href="/api/files/' + cv.id + '" target="_blank" rel="noopener">View</a>' : '') + '<button type="button" data-act="cv-del" aria-label="Remove CV">' + ic('close') + '</button></p>') : '') +
       '<label class="btn btn-ghost btn-sm att-add" for="up-cv">' + ic('clip') + (cv ? 'Replace CV' : 'Upload CV') + '</label><input type="file" id="up-cv" class="sr-only" data-up="cv" accept=".pdf,.doc,.docx">' +
       '<p class="hint">PDF or Word, up to 5 MB. Remove your phone number, email and social handles from your CV first. Clients contact you through PadiHire.</p></div>';
+  }
+  function cvFillBox(setup) {
+    var st = S.cvfill || {};
+    var body = st.busy ? '<p class="cvf-t"><strong>Reading your CV…</strong><span class="small">This takes about 10 seconds.</span></p>'
+      : st.done ? '<p class="cvf-t"><strong>' + ic('tick') + 'Filled in from your CV</strong><span class="small">Check the category, headline, skills and bio below, change anything you like, then save.</span></p><label class="btn btn-ghost btn-sm" for="up-cvfill">Use another CV</label>'
+      : '<p class="cvf-t"><strong>' + (setup ? 'Fill this in from your CV' : 'Update this from your CV') + '</strong><span class="small">Upload your CV (PDF or Word .docx) and we’ll fill in your category, headline, skills and bio. You can change anything before saving.</span>' + (st.err ? '<span class="cvf-err">' + esc(st.err) + '</span>' : '') + '</p><label class="btn btn-primary btn-sm" for="up-cvfill">' + ic('doc') + 'Upload CV</label>';
+    return '<section class="cvfill' + (st.busy ? ' busy' : '') + '" id="cvfill" aria-live="polite">' + body + '<input type="file" id="up-cvfill" class="sr-only" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"' + (st.busy ? ' disabled' : '') + '></section>';
+  }
+  function cvFillRefresh() { var b = $('#cvfill'); if (b) b.outerHTML = cvFillBox(S.view === 'setup'); }
+  function readCv(file) {
+    if (!file) return;
+    if (!/\.(pdf|docx)$/i.test(file.name)) { S.cvfill = { err: 'Use a PDF or Word .docx file. Older .doc files can’t be read, so save it as a PDF first.' }; cvFillRefresh(); return; }
+    if (file.size > 5 * 1048576) { S.cvfill = { err: 'Your CV must be 5 MB or less.' }; cvFillRefresh(); return; }
+    S.cvfill = { busy: true }; cvFillRefresh();
+    upload(file, 'cv').then(function (f) {
+      S.cv = f; var box = $('#cv-box'); if (box) box.outerHTML = cvBlock();
+      return api('POST', 'me/cv/read', { file_id: f.id });
+    }).then(function (r) {
+      var cat = $('#pf-cat'); if (cat && r.cat) { cat.value = r.cat; if (S.picks.pf) S.picks.pf.cat = r.cat; }
+      if (r.title && $('#pf-title')) $('#pf-title').value = r.title;
+      if (r.about && $('#pf-about')) $('#pf-about').value = r.about;
+      if (r.skills && r.skills.length && S.picks.pf) { S.picks.pf.list = r.skills.slice(0, 3); }
+      if (S.picks.pf) spRefresh('pf');
+      ['pf-cat', 'pf-title', 'pf-about'].forEach(function (id) { var el = $('#' + id); if (el) { el.classList.add('filled'); setTimeout(function () { el.classList.remove('filled'); }, 2500); } });
+      S.cvfill = { done: true }; cvFillRefresh(); toast('Filled in from your CV. Check it, then save.');
+    }).catch(function (er) { S.cvfill = { err: er.message || 'We couldn’t read your CV. Please fill in the form yourself.' }; cvFillRefresh(); });
   }
   function handleCv(file) {
     if (!file) return;
@@ -427,16 +453,13 @@
           '<p class="center-line">Already have an account? <a class="link-btn" href="#/login">Log in</a></p></div>';
       }
       var fre = j.role === 'fre';
-      return '<div class="wrap scr narrow"><button type="button" class="back" data-act="join-back">' + ic('back') + 'Change account type</button><h1 class="pg-title">' + (fre ? 'Sign up to find work' : 'Sign up to hire') + '</h1><p class="pg-sub">' + (fre ? 'Freelancer account' : 'Client account') + '</p>' +
+      return '<div class="wrap scr narrow"><button type="button" class="back" data-act="join-back">' + ic('back') + 'Change account type</button><h1 class="pg-title">' + (fre ? 'Sign up to find work' : 'Sign up to hire') + '</h1><p class="pg-sub">' + (fre ? 'Freelancer account. You’ll set up your profile next.' : 'Client account. Posting jobs is free.') + '</p>' +
         '<form id="f-join" class="form" novalidate>' +
-        field('jn-name', 'Full name', '<input id="jn-name" type="text" autocomplete="name" placeholder="e.g. Chioma Okeke">') +
-        (fre ? '<div class="field-row">' + field('jn-cat', 'Type of work', '<select id="jn-cat">' + catOptions('Choose one') + '</select>') + field('jn-title', 'Your main skill', '<input id="jn-title" type="text" placeholder="e.g. Flyer and logo designer">') + '</div>'
-          : field('jn-business', 'Business or brand name', '<input id="jn-business" type="text" placeholder="e.g. Chioma’s Bakery">', 'Optional. Freelancers see it on your jobs.')) +
-        field('jn-phone', 'Phone number', '<input id="jn-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0803 123 4567">') +
+        '<div class="field-row">' + field('jn-first_name', 'First name', '<input id="jn-first_name" type="text" autocomplete="given-name" placeholder="e.g. Chioma">') + field('jn-last_name', 'Last name', '<input id="jn-last_name" type="text" autocomplete="family-name" placeholder="e.g. Okeke">') + '</div>' +
         field('jn-email', 'Email', '<input id="jn-email" type="email" autocomplete="email" placeholder="you@example.com">') +
         field('jn-password', 'Password', '<input id="jn-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">') +
-        '<label class="check"><input type="checkbox" id="jn-adult"><span>I am 18 or older</span></label><p class="err" id="jn-adult-err" hidden></p>' +
-        '<label class="check"><input type="checkbox" id="jn-terms"><span>I agree to the <a class="link-btn" href="#/terms" target="_blank">terms</a> and <a class="link-btn" href="#/privacy" target="_blank">privacy policy</a>, and will keep all payments on PadiHire.</span></label><p class="err" id="jn-terms-err" hidden></p>' +
+        field('jn-state', 'State', '<select id="jn-state">' + cityOptions('Choose your state') + '</select>') +
+        '<label class="check"><input type="checkbox" id="jn-terms"><span>I am 18 or older, I agree to the <a class="link-btn" href="#/terms" target="_blank">terms</a> and <a class="link-btn" href="#/privacy" target="_blank">privacy policy</a>, and I’ll keep all payments on PadiHire.</span></label><p class="err" id="jn-terms-err" hidden></p>' +
         (S.me.turnstile ? '<div class="field"><div id="jn-human" class="ts-box"></div><p class="err" id="jn-human-err" hidden></p></div>' : '') +
         '<button type="submit" class="btn btn-primary full">Create my account</button></form></div>';
     }
@@ -736,19 +759,21 @@
   };
   function profileHtml(setup) {
       var u = U(), fre = role() === 'fre';
-      S.cv = undefined;
+      S.cv = undefined; S.cvfill = null;
       return '<div class="wrap scr narrow">' + (setup ? '<p class="step-note">Last step</p>' : backBtn()) + '<h1 class="pg-title">' + (setup ? (fre ? 'Set up your profile' : 'Finish your profile') : 'Edit profile') + '</h1>' +
-        (setup ? '<p class="pg-sub">' + (fre ? 'Clients see this when you apply. Fill it in to start using PadiHire. Pick up to 3 skills and add your CV so you stand out.' : 'Tell freelancers where you are. This takes a few seconds.') + '</p>' : '') +
+        (setup ? '<p class="pg-sub">' + (fre ? 'Clients see this when you apply. Fill it in to start using PadiHire.' : 'Tell freelancers where you are. This takes a few seconds.') + '</p>' : '') +
+        (fre && S.me.ai ? cvFillBox(setup) : '') +
         '<form id="f-profile" class="form" novalidate data-setup="' + (setup ? 1 : 0) + '">' +
         field('pf-name', 'Full name', '<input id="pf-name" type="text" value="' + esc(u.name) + '" autocomplete="name">') +
-        field('pf-city', 'City', '<select id="pf-city">' + cityOptions('Choose your city') + '</select>') +
-        (fre ? field('pf-title', 'Headline', '<input id="pf-title" type="text" maxlength="80" value="' + esc(u.title) + '" placeholder="e.g. Brand and social media designer">', 'Shown under your name') +
-          field('pf-cat', 'Category', '<select id="pf-cat">' + catOptions('Choose one') + '</select>') +
+        field('pf-city', 'State', '<select id="pf-city">' + cityOptions('Choose your state') + '</select>') +
+        (fre ? field('pf-cat', 'Category', '<select id="pf-cat">' + catOptions('Choose one') + '</select>') +
+          field('pf-title', 'Headline', '<input id="pf-title" type="text" maxlength="80" value="' + esc(u.title) + '" placeholder="e.g. Brand and social media designer">', 'Shown under your name') +
           '<div class="field" id="pf-skills"><span class="flabel">Your skills (up to 3)</span>' + skillPicker('pf', 3, u.skills, u.cat) + '<p class="err" id="pf-skills-err" hidden></p></div>' +
           field('pf-about', 'About you', '<textarea id="pf-about" rows="5" maxlength="1200" placeholder="What you do, who you have worked for, and how fast you deliver.">' + esc(u.about) + '</textarea>', 'At least a sentence or two') +
           '<div class="field"><span class="flabel">CV <span class="opt">(optional)</span></span>' + cvBlock() + '</div>' +
           field('pf-rate', 'Jobs from (₦) <span class="opt">(optional)</span>', '<input id="pf-rate" type="text" inputmode="numeric" value="' + (u.rate_from ? num(u.rate_from) : '') + '" placeholder="15,000">', 'Your usual starting price')
-          : field('pf-business', 'Business or brand name', '<input id="pf-business" type="text" value="' + esc(u.business) + '">', 'Optional')) +
+          : field('pf-business', 'Business or brand name <span class="opt">(optional)</span>', '<input id="pf-business" type="text" value="' + esc(u.business) + '">')) +
+        field('pf-phone', 'Phone number <span class="opt">(optional)</span>', '<input id="pf-phone" type="tel" inputmode="tel" autocomplete="tel" value="' + esc(u.phone) + '" placeholder="0803 123 4567">', 'Only PadiHire sees it, for support and logging in. Never shown to anyone else.') +
         '<button type="submit" class="btn btn-primary full">' + (setup ? (fre ? 'Save and find work' : 'Save and continue') : 'Save profile') + '</button></form>' +
         (fre && !setup ? '<h2 class="sub" style="margin-top:34px">Portfolio</h2><p class="small">Show up to 8 pictures of your best work. Clients see them on your profile.</p><div id="pf-port" class="port-grid">' + portGrid(S.port, true) + '</div>' : '') +
         (setup ? '<p class="center-line small">Not you? <button type="button" class="link-btn" data-act="signout">Log out</button></p>' :
@@ -1050,13 +1075,11 @@
       run(api('POST', 'auth/login', { login: login, password: pw }), function () { loadMe().then(function () { var n = S.next; S.next = ''; if (n && n !== '#/login') location.hash = n; else go(home()); toast('Welcome back, ' + first(U().name)); }); }, '', 'lg-pass');
     } else if (id === 'f-join') {
       var stop = false;
-      if (!$('#jn-adult').checked) { fieldErr('jn-adult', 'You must be 18 or older to use PadiHire.'); stop = true; } else fieldErr('jn-adult', '');
-      if (!$('#jn-terms').checked) { fieldErr('jn-terms', 'Tick the box to agree to the terms.'); stop = true; } else fieldErr('jn-terms', '');
+      if (!$('#jn-terms').checked) { fieldErr('jn-terms', 'Tick the box to confirm you’re 18 or older and agree to the terms.'); stop = true; } else fieldErr('jn-terms', '');
       if ($('#jn-human') && !S.tsToken) { fieldErr('jn-human', 'Complete the check to show you’re human.'); stop = true; }
       if (stop) return;
-      var fre = S.join.role === 'fre';
-      run(api('POST', 'auth/signup', { role: S.join.role, name: $('#jn-name').value, email: $('#jn-email').value, phone: $('#jn-phone').value, password: $('#jn-password').value, cat: fre ? $('#jn-cat').value : '', title: fre ? $('#jn-title').value : '', business: fre ? '' : $('#jn-business').value, adult: true, cf_token: S.tsToken || '' }),
-        function () { loadMe().then(function () { S.join = { step: 1, role: null }; var n = S.next; S.next = (n && n !== '#/login' && n !== '#/join') ? n : ''; go('setup'); toast('Welcome to PadiHire, ' + first(U().name)); }); }, 'jn-')
+      run(api('POST', 'auth/signup', { role: S.join.role, first_name: $('#jn-first_name').value, last_name: $('#jn-last_name').value, email: $('#jn-email').value, password: $('#jn-password').value, state: $('#jn-state').value, adult: true, cf_token: S.tsToken || '' }),
+        function () { loadMe().then(function () { S.join = { step: 1, role: null }; var n = S.next; S.next = (n && n !== '#/login' && n !== '#/join') ? n : ''; if (needsSetup()) go('setup'); else if (S.next) { location.hash = S.next; S.next = ''; } else go(home()); toast('Welcome to PadiHire, ' + first(U().name)); }); }, 'jn-')
         .then(function () { if (!U() && window.turnstile && S.tsWidget != null && $('#jn-human')) { try { window.turnstile.reset(S.tsWidget); } catch (e) { /* ignore */ } S.tsToken = ''; } });
     } else if (id === 'f-forgot') {
       var fl = $('#fg-login').value.trim();
@@ -1107,7 +1130,7 @@
     } else if (id === 'f-profile') {
       var fr = role() === 'fre';
       if (S.cv && S.cv.busy) { toast('Wait for your CV to finish uploading.'); return; }
-      var body = { name: $('#pf-name').value, city: $('#pf-city').value, title: fr ? $('#pf-title').value : U().title, cat: fr ? $('#pf-cat').value : U().cat, skills: fr ? S.picks.pf.list : U().skills, about: fr ? $('#pf-about').value : U().about, rate_from: fr ? parseNum($('#pf-rate').value) : U().rate_from, business: fr ? U().business : $('#pf-business').value };
+      var body = { name: $('#pf-name').value, city: $('#pf-city').value, title: fr ? $('#pf-title').value : U().title, cat: fr ? $('#pf-cat').value : U().cat, skills: fr ? S.picks.pf.list : U().skills, about: fr ? $('#pf-about').value : U().about, rate_from: fr ? parseNum($('#pf-rate').value) : U().rate_from, business: fr ? U().business : $('#pf-business').value, phone: $('#pf-phone').value.trim() };
       if (fr && S.cv !== undefined) body.cv_file = S.cv ? S.cv.id : 0;
       run(api('POST', 'me/profile', body),
         function (r) { S.cv = undefined; loadMe().then(function () { var wasSetup = S.view === 'setup', n = S.next; S.next = ''; toast(r.masked ? MASK_NOTE : wasSetup ? 'You\u2019re all set' : 'Profile saved'); if (wasSetup && n && n !== '#/setup') location.hash = n; else go(wasSetup ? home() : fr ? 'work' : 'account'); }); }, 'pf-');
@@ -1136,6 +1159,7 @@
   document.addEventListener('change', function (e) {
     var el = e.target;
     if (el.matches && el.matches('input[type=file][data-up]')) { handleFiles(el); return; }
+    if (el.id === 'up-cvfill' && el.files && el.files[0]) { readCv(el.files[0]); return; }
     if (el.id === 'up-port' && el.files && el.files[0]) {
       var file = el.files[0], pick = $('#pt-pick');
       if (file.size > 5 * 1048576) { fieldErr('pt-file', 'That picture is too big. The limit is 5 MB.'); return; }

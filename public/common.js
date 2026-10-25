@@ -9,7 +9,8 @@ var CATS = [
   { id: 'admin', label: 'Admin & data entry', short: 'Admin' }
 ];
 var CAT = {}; CATS.forEach(function (c) { CAT[c.id] = c; });
-var CITIES = ['Lagos', 'Abuja', 'Port Harcourt', 'Ibadan', 'Enugu', 'Kano', 'Benin City', 'Kaduna', 'Uyo', 'Owerri', 'Abeokuta', 'Jos', 'Ilorin', 'Warri'];
+/* All 36 states and the FCT. Stored in the city field of users and jobs. */
+var CITIES = ['Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT (Abuja)', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara'];
 var BUDGETS = [
   { id: 'u20', label: 'Under ₦20k' }, { id: '20-50', label: '₦20k – ₦50k' },
   { id: '50-150', label: '₦50k – ₦150k' }, { id: '150p', label: 'Above ₦150k' }
