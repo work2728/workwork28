@@ -29,8 +29,11 @@ CREATE TABLE IF NOT EXISTS users (
   cv_file INTEGER NOT NULL DEFAULT 0,
   cv_name TEXT NOT NULL DEFAULT '',
   email_verified INTEGER NOT NULL DEFAULT 0,
-  email_alerts INTEGER NOT NULL DEFAULT 1
+  email_alerts INTEGER NOT NULL DEFAULT 1,
+  photo_file INTEGER NOT NULL DEFAULT 0,          -- files.id of the profile photo (0 = none)
+  username TEXT NOT NULL DEFAULT ''                -- profile link: /u/username
 );
+CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users(username) WHERE username != '';
 
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -53,7 +56,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   descr TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open',         -- open, hired, closed, removed
   props INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  edited_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS jobs_client ON jobs(client_id);

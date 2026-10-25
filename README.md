@@ -55,6 +55,7 @@ Each update ships with an `update-N.sql` file. Run it **once** in the D1 Console
 - `update-2.sql`: CV and attachments, contact flags.
 - `update-3.sql`: email confirmation, password reset, email alerts, spam limits, portfolio.
 - `update-4.sql`: locations become states (36 states + FCT).
+- `update-5.sql`: profile photos, profile links (/u/name), edited jobs, withdrawal receipts.
 
 ## Email and spam protection (optional settings)
 
@@ -62,7 +63,7 @@ These switch on by adding variables in Cloudflare: Workers & Pages > workwork28 
 
 - `RESEND_API_KEY` (secret): from resend.com > API Keys, after your domain is verified there.
 - `MAIL_FROM`: the sender, for example `PadiHire <hello@padihire.com>`. It must use the domain you verified in Resend.
-- `SITE_URL`: your live address, for example `https://padihire.com`. Used for links inside emails.
+- `SITE_URL`: your live address, for example `https://padihire.com`. Used for links inside emails and for link previews (WhatsApp, Facebook) of /j/ job links and /u/ profile links.
 - `TURNSTILE_SITEKEY` and `TURNSTILE_SECRET` (secret): from Cloudflare > Turnstile > Add widget, with your domain added.
 
 - Workers AI binding named `AI` (Settings > Bindings > Add > Workers AI): switches on "Fill this in from your CV" in profile setup. It reads PDF and .docx CVs. Each read uses a little Workers AI usage, which has a free daily allowance; check Cloudflare's Workers AI pricing page for current limits. Each user can read up to 6 CVs a day.
