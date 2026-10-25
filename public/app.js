@@ -1448,6 +1448,13 @@
 
   /* ---------- boot ---------- */
   if (window.__ROUTE && !location.hash) history.replaceState(null, '', '/#/' + window.__ROUTE);
+  (function () {
+    var sp = document.getElementById('splash'); if (!sp) return;
+    function gone() { if (sp.parentNode) sp.parentNode.removeChild(sp); }
+    sp.addEventListener('animationend', function (e) { if (e.animationName === 'sp-out') gone(); });
+    sp.addEventListener('click', gone);
+    setTimeout(gone, 3000);
+  })();
   setupModal();
   footer();
   api('GET', 'me').then(function (m) { S.me = m; }, function () { S.me = { user: null }; }).then(function () {
