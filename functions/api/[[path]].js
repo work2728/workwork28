@@ -246,7 +246,8 @@ function selfView(u) {
     rating: u.rating_count ? +(u.rating_sum / u.rating_count).toFixed(1) : 0, reviews: u.rating_count, jobs_done: u.jobs_done,
     bank: { name: u.bank_name, acct: u.bank_acct, holder: u.bank_holder }, created_at: u.created_at,
     cv: u.cv_file ? { id: u.cv_file, name: u.cv_name } : null,
-    email_verified: !!u.email_verified, email_alerts: u.email_alerts !== 0
+    email_verified: !!u.email_verified, email_alerts: u.email_alerts !== 0,
+    photo: u.photo_file || 0, username: u.username || ''
   };
 }
 function parseList(v) { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
@@ -317,6 +318,7 @@ on('POST', 'auth/signup', async (c) => {
     const r = await c.db.prepare('INSERT INTO users (name, email, phone, pass_hash, city, role, title, cat, skills, business, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .bind(name, email, phone || NOPHONE + hex(crypto.getRandomValues(new Uint8Array(8))), await hashPass(pass), state, role, title, cat, skills, role === 'cli' ? scrub(str(b.business, 80)).text : '', now()).run();
     await startSession(c, r.meta.last_row_id);
+    await ensureUsername(c, { id: r.meta.last_row_id, name, username: '' });
     if (mailOn(c)) later(c, sendVerify(c, { id: r.meta.last_row_id, name, email }));
   } catch (e) {
     if (isUnique(e)) {
@@ -426,6 +428,7 @@ on('GET', 'me', async (c) => {
   const s = await settings(c);
   if (!c.user) return { user: null, support_whatsapp: s.support_whatsapp, mail: mailOn(c), turnstile: c.env.TURNSTILE_SECRET ? String(c.env.TURNSTILE_SITEKEY || '') : '' };
   const u = c.user, cli = u.role === 'cli';
+  if (!u.username) await ensureUsername(c, u);
   const [unread, waiting, active, other] = await c.db.batch([
     c.db.prepare('SELECT COALESCE(SUM(' + (cli ? 'client_unread' : 'fre_unread') + '), 0) AS n FROM threads WHERE ' + (cli ? 'client_id' : 'fre_id') + ' = ?').bind(u.id),
     c.db.prepare("SELECT COUNT(*) AS n FROM contracts WHERE client_id = ? AND stage = 'delivered'").bind(u.id),
@@ -464,6 +467,12 @@ on('POST', 'me/profile', async (c) => {
     const taken = await c.db.prepare('SELECT id FROM users WHERE phone = ? AND id != ?').bind(phone, u.id).first();
     if (taken) fields.phone = 'Another account already uses this number.';
   }
+  const uname = 'username' in b ? String(b.username || '').trim().toLowerCase() : '';
+  if (uname && uname !== u.username) {
+    if (!USERNAME.test(uname)) fields.username = 'Use 3 to 30 letters, numbers or dashes, like tolu-designs.';
+    else if (RESERVED_NAMES.has(uname)) fields.username = 'That link is taken. Try another.';
+    else if (await c.db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').bind(uname, u.id).first()) fields.username = 'That link is taken. Try another.';
+  }
   if (u.role === 'fre') {
     if (str(b.title, 80).length < 3) fields.title = 'Add a short headline, e.g. Brand designer.';
     if (!cat) fields.cat = 'Choose your category.';
@@ -474,6 +483,7 @@ on('POST', 'me/profile', async (c) => {
   const stmts = [c.db.prepare('UPDATE users SET name = ?, city = ?, title = ?, cat = ?, skills = ?, about = ?, rate_from = ?, business = ? WHERE id = ?')
     .bind(name, city, title.text, cat, JSON.stringify(skills), about.text, Math.max(0, int(b.rate_from)), biz.text, u.id)];
   if (phone && phone !== u.phone) stmts.push(c.db.prepare('UPDATE users SET phone = ? WHERE id = ?').bind(phone, u.id));
+  if (uname && uname !== u.username) stmts.push(c.db.prepare('UPDATE users SET username = ? WHERE id = ?').bind(uname, u.id));
   const hit = title.hit || about.hit || biz.hit;
   if (hit) stmts.push(flagStmt(c, 'profile', u.id, [b.title, b.about, b.business].filter(Boolean).join(' | '), Array.from(new Set(title.reasons.concat(about.reasons, biz.reasons)))));
   if ('cv_file' in b) {
@@ -502,15 +512,80 @@ on('POST', 'me/bank', async (c) => {
   return { ok: true };
 });
 
+/* ---------- usernames for profile links (/u/name) ---------- */
+const RESERVED_NAMES = new Set(['admin', 'api', 'support', 'help', 'about', 'pricing', 'padihire', 'me', 'login', 'join', 'www', 'jobs', 'work']);
+function slugify(s, max) {
+  return String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, max || 30).replace(/-+$/, '');
+}
+const USERNAME = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/;
+async function ensureUsername(c, u) {
+  if (!u || u.username) return (u && u.username) || '';
+  try {
+    let base = slugify(u.name, 24) || 'padi';
+    if (base.length < 3) base += '-padi';
+    if (RESERVED_NAMES.has(base)) base += '-1';
+    for (let i = 0; i < 6; i++) {
+      const cand = i === 0 ? base : base + '-' + (i < 3 ? String(i + 1) : hex(crypto.getRandomValues(new Uint8Array(2))));
+      try {
+        const r = await c.db.prepare("UPDATE users SET username = ? WHERE id = ? AND username = ''").bind(cand, u.id).run();
+        if (r.meta.changes) { u.username = cand; return cand; }
+        const now1 = await c.db.prepare('SELECT username FROM users WHERE id = ?').bind(u.id).first();
+        if (now1 && now1.username) { u.username = now1.username; return now1.username; }
+      } catch (e) { if (!isUnique(e)) throw e; }
+    }
+  } catch (e) { console.error('username', e && e.message); }
+  return '';
+}
+
+/* ---------- profile photo ---------- */
+on('POST', 'me/photo', async (c) => {
+  const u = need(c), fid = int(c.body.file_id);
+  const stmts = [c.db.prepare("UPDATE files SET scope = 'old' WHERE user_id = ? AND scope = 'avatar'").bind(u.id)];
+  if (fid) {
+    const f = await c.db.prepare("SELECT id FROM files WHERE id = ? AND user_id = ? AND kind = 'avatar' AND scope = 'pending'").bind(fid, u.id).first();
+    if (!f) fail(400, 'Upload your photo again.');
+    stmts.push(c.db.prepare("UPDATE files SET scope = 'avatar', ref_id = ? WHERE id = ?").bind(u.id, fid));
+  }
+  stmts.push(c.db.prepare('UPDATE users SET photo_file = ? WHERE id = ?').bind(fid || 0, u.id));
+  await c.db.batch(stmts);
+  return { ok: true, photo: fid || 0 };
+});
+
+/* ---------- receipts ---------- */
+const pad6 = (n) => String(n).padStart(6, '0');
+on('GET', 'receipts/:kind/:id', async (c, p) => {
+  const u = need(c), id = int(p.id), s = await settings(c);
+  if (p.kind === 'contract') {
+    const k = await c.db.prepare('SELECT k.*, cu.name AS client_name, cu.business AS client_business, fu.name AS fre_name FROM contracts k JOIN users cu ON cu.id = k.client_id JOIN users fu ON fu.id = k.fre_id WHERE k.id = ?').bind(id).first();
+    if (!k || (k.client_id !== u.id && k.fre_id !== u.id && !u.is_admin)) fail(404, 'Receipt not found.');
+    const side = k.fre_id === u.id && k.client_id !== u.id ? 'fre' : 'client';
+    const r = { kind: 'contract', number: 'PH-C-' + pad6(k.id), date: k.created_at, title: k.title, stage: k.stage, amount: k.amount, days: k.days, closed_at: k.closed_at || null, client: k.client_business || k.client_name, client_person: k.client_name, freelancer: k.fre_name, side };
+    if (side === 'client') Object.assign(r, { fee: k.client_fee, total: k.amount + k.client_fee, fee_refunded: !!k.fee_refunded });
+    else { const fee = k.fre_fee || Math.round(k.amount * k.fre_fee_pct / 100); Object.assign(r, { fee, fee_pct: k.fre_fee_pct, net: k.amount - fee }); }
+    return { receipt: r, support_whatsapp: s.support_whatsapp };
+  }
+  if (p.kind === 'topup') {
+    const t = await c.db.prepare('SELECT t.*, u.name, u.business FROM topups t JOIN users u ON u.id = t.user_id WHERE t.id = ?').bind(id).first();
+    if (!t || (t.user_id !== u.id && !u.is_admin)) fail(404, 'Receipt not found.');
+    return { receipt: { kind: 'topup', number: 'PH-T-' + pad6(t.id), date: t.created_at, decided_at: t.decided_at || null, amount: t.amount, ref: t.ref, status: t.status, note: t.note, name: t.business || t.name }, support_whatsapp: s.support_whatsapp };
+  }
+  if (p.kind === 'withdrawal') {
+    const w = await c.db.prepare('SELECT w.*, u.name FROM withdrawals w JOIN users u ON u.id = w.user_id WHERE w.id = ?').bind(id).first();
+    if (!w || (w.user_id !== u.id && !u.is_admin)) fail(404, 'Receipt not found.');
+    return { receipt: { kind: 'withdrawal', number: 'PH-W-' + pad6(w.id), date: w.created_at, decided_at: w.decided_at || null, amount: w.amount, status: w.status, note: w.note, name: w.name, bank: w.bank_name, acct: '••' + String(w.bank_acct).slice(-4), holder: w.bank_holder }, support_whatsapp: s.support_whatsapp };
+  }
+  fail(404, 'Receipt not found.');
+});
+
 /* ---------- jobs ---------- */
 function jobView(j, extra) {
   return Object.assign({
     id: j.id, title: j.title, cat: j.cat, level: j.level, budget: j.budget, days: j.days, city: j.city, remote: !!j.remote,
-    skills: parseList(j.skills), descr: j.descr, props: j.props, status: j.status, created_at: j.created_at,
-    client: { id: j.client_id, name: j.business || j.client_name, person: j.client_name, verified: !!j.verified, since: j.client_since }
+    skills: parseList(j.skills), descr: j.descr, props: j.props, status: j.status, created_at: j.created_at, edited_at: j.edited_at || 0,
+    client: { id: j.client_id, name: j.business || j.client_name, person: j.client_name, verified: !!j.verified, since: j.client_since, photo: j.client_photo || 0 }
   }, extra || {});
 }
-const JOB_SELECT = 'SELECT j.*, u.name AS client_name, u.business, u.verified, u.created_at AS client_since FROM jobs j JOIN users u ON u.id = j.client_id';
+const JOB_SELECT = 'SELECT j.*, u.name AS client_name, u.business, u.verified, u.created_at AS client_since, u.photo_file AS client_photo FROM jobs j JOIN users u ON u.id = j.client_id';
 
 on('GET', 'jobs', async (c) => {
   const q = c.q, where = ["j.status = 'open'", "u.status = 'active'"], args = [];
@@ -562,10 +637,8 @@ on('GET', 'jobs/:id', async (c, p) => {
   out.similar = await withFlags(c, similar.map((x) => jobView(x)));
   return { job: out };
 });
-on('POST', 'jobs', async (c) => {
-  const u = need(c), b = c.body, fields = {};
-  if (!u.city) fail(400, 'Finish setting up your profile before you post a job.');
-  const rawTitle = str(b.title, 120), rawDescr = str(b.descr, 4000), cat = b.cat, budget = int(b.budget), days = Math.max(1, Math.min(365, int(b.days) || 3));
+function jobInput(u, b) {
+  const fields = {}, rawTitle = str(b.title, 120), rawDescr = str(b.descr, 4000), cat = b.cat, budget = int(b.budget), days = Math.max(1, Math.min(365, int(b.days) || 3));
   const st = scrub(rawTitle), sd = scrub(rawDescr), title = st.text, descr = sd.text;
   const level = LEVELS.indexOf(b.level) >= 0 ? b.level : 'Intermediate';
   const remote = b.city === 'Remote' || !b.city;
@@ -575,14 +648,35 @@ on('POST', 'jobs', async (c) => {
   if (budget > 50000000) fields.budget = 'That budget is too large.';
   if (descr.length < 20) fields.descr = 'Describe the job in at least 20 characters.';
   if (Object.keys(fields).length) fail(400, 'Please fix the highlighted fields.', { fields });
+  const skills = cleanSkills(b.skills, 5);
+  return {
+    title, descr, cat, level, budget, days, remote: remote ? 1 : 0, city: remote ? (u.city || '') : (stateOf(b.city) || str(b.city, 40)),
+    skills: JSON.stringify(skills.length ? skills : [CAT_SHORT[cat]]), hit: st.hit || sd.hit, raw: rawTitle + ' | ' + rawDescr, reasons: Array.from(new Set(st.reasons.concat(sd.reasons)))
+  };
+}
+on('POST', 'myjobs/:id/edit', async (c, p) => {
+  const u = need(c);
+  const j = await c.db.prepare('SELECT * FROM jobs WHERE id = ? AND client_id = ?').bind(int(p.id), u.id).first();
+  if (!j) fail(404, 'Job not found.');
+  if (j.status !== 'open') fail(400, 'You can only edit a job while it’s open. This one is ' + (j.status === 'hired' ? 'already hired.' : 'closed.'));
+  const x = jobInput(u, c.body);
+  const stmts = [c.db.prepare('UPDATE jobs SET title = ?, cat = ?, level = ?, budget = ?, days = ?, city = ?, remote = ?, skills = ?, descr = ?, edited_at = ? WHERE id = ? AND status = ?')
+    .bind(x.title, x.cat, x.level, x.budget, x.days, x.city, x.remote, x.skills, x.descr, now(), j.id, 'open')];
+  if (x.hit) stmts.push(flagStmt(c, 'job', j.id, x.raw, x.reasons));
+  await c.db.batch(stmts);
+  return { ok: true, id: j.id, masked: x.hit };
+});
+on('POST', 'jobs', async (c) => {
+  const u = need(c), b = c.body;
+  if (!u.city) fail(400, 'Finish setting up your profile before you post a job.');
+  const x = jobInput(u, b);
   const recent = await c.db.prepare('SELECT COUNT(*) AS n FROM jobs WHERE client_id = ? AND created_at > ?').bind(u.id, now() - DAY).first();
   if (recent.n >= 10) fail(429, 'You can post up to 10 jobs a day.');
-  const skills = cleanSkills(b.skills, 5);
   const r = await c.db.prepare('INSERT INTO jobs (client_id, title, cat, level, budget, days, city, remote, skills, descr, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(u.id, title, cat, level, budget, days, remote ? (u.city || '') : (stateOf(b.city) || str(b.city, 40)), remote ? 1 : 0, JSON.stringify(skills.length ? skills : [CAT_SHORT[cat]]), descr, now()).run();
-  if (st.hit || sd.hit) await flagStmt(c, 'job', r.meta.last_row_id, rawTitle + ' | ' + rawDescr, Array.from(new Set(st.reasons.concat(sd.reasons)))).run();
+    .bind(u.id, x.title, x.cat, x.level, x.budget, x.days, x.city, x.remote, x.skills, x.descr, now()).run();
+  if (x.hit) await flagStmt(c, 'job', r.meta.last_row_id, x.raw, x.reasons).run();
   if (u.role !== 'cli') await c.db.prepare("UPDATE users SET role = 'cli' WHERE id = ?").bind(u.id).run();
-  return { ok: true, id: r.meta.last_row_id, masked: st.hit || sd.hit };
+  return { ok: true, id: r.meta.last_row_id, masked: x.hit };
 });
 on('POST', 'jobs/:id/report', async (c, p) => {
   const u = need(c), reason = str(c.body.reason, 200);
@@ -649,20 +743,20 @@ on('GET', 'proposals', async (c) => {
 /* ---------- client jobs ---------- */
 on('GET', 'myjobs', async (c) => {
   const u = need(c);
-  const rows = (await c.db.prepare("SELECT j.id, j.title, j.budget, j.days, j.status, j.props, j.created_at, c.id AS contract_id, c.stage, c.amount, c.thread_id, c.rated, f.name AS fre_name, f.id AS fre_id FROM jobs j LEFT JOIN contracts c ON c.job_id = j.id LEFT JOIN users f ON f.id = c.fre_id WHERE j.client_id = ? AND j.status != 'removed' ORDER BY j.id DESC LIMIT 200").bind(u.id).all()).results;
+  const rows = (await c.db.prepare("SELECT j.id, j.title, j.budget, j.days, j.status, j.props, j.created_at, c.id AS contract_id, c.stage, c.amount, c.thread_id, c.rated, f.name AS fre_name, f.id AS fre_id, f.photo_file AS fre_photo FROM jobs j LEFT JOIN contracts c ON c.job_id = j.id LEFT JOIN users f ON f.id = c.fre_id WHERE j.client_id = ? AND j.status != 'removed' ORDER BY j.id DESC LIMIT 200").bind(u.id).all()).results;
   return { jobs: rows };
 });
 on('GET', 'myjobs/:id', async (c, p) => {
   const u = need(c), s = await settings(c);
   const j = await c.db.prepare('SELECT * FROM jobs WHERE id = ? AND client_id = ?').bind(int(p.id), u.id).first();
   if (!j) fail(404, 'Job not found.');
-  const props = (await c.db.prepare('SELECT p.*, f.name, f.title AS fre_title, f.city, f.rating_sum, f.rating_count, f.jobs_done, f.cv_file, f.cv_name, t.id AS thread_id FROM proposals p JOIN users f ON f.id = p.fre_id LEFT JOIN threads t ON t.job_id = p.job_id AND t.fre_id = p.fre_id AND t.client_id = ? WHERE p.job_id = ? ORDER BY p.id DESC').bind(u.id, j.id).all()).results;
+  const props = (await c.db.prepare('SELECT p.*, f.name, f.title AS fre_title, f.city, f.rating_sum, f.rating_count, f.jobs_done, f.cv_file, f.cv_name, f.photo_file, t.id AS thread_id FROM proposals p JOIN users f ON f.id = p.fre_id LEFT JOIN threads t ON t.job_id = p.job_id AND t.fre_id = p.fre_id AND t.client_id = ? WHERE p.job_id = ? ORDER BY p.id DESC').bind(u.id, j.id).all()).results;
   const contract = await c.db.prepare('SELECT * FROM contracts WHERE job_id = ?').bind(j.id).first();
   const pf = (await c.db.prepare("SELECT f.id, f.ref_id, f.name, f.type, f.size FROM files f JOIN proposals p ON p.id = f.ref_id WHERE f.scope = 'proposal' AND p.job_id = ? ORDER BY f.id").bind(j.id).all()).results;
   return {
-    job: Object.assign(jobView(Object.assign({}, j, { client_name: u.name, business: u.business, verified: u.verified, client_since: u.created_at })), { contract_id: contract ? contract.id : null, thread_id: contract ? contract.thread_id : null }),
+    job: Object.assign(jobView(Object.assign({}, j, { client_name: u.name, business: u.business, verified: u.verified, client_since: u.created_at, client_photo: u.photo_file })), { contract_id: contract ? contract.id : null, thread_id: contract ? contract.thread_id : null }),
     client_fee_pct: s.client_fee_pct, avail: u.avail,
-    proposals: props.map((r) => ({ id: r.id, fre_id: r.fre_id, name: r.name, title: r.fre_title, city: r.city, rating: r.rating_count ? +(r.rating_sum / r.rating_count).toFixed(1) : 0, reviews: r.rating_count, jobs_done: r.jobs_done, price: r.price, days: r.days, note: r.note, status: r.status, created_at: r.created_at, thread_id: r.thread_id, cv: r.cv_file ? { id: r.cv_file, name: r.cv_name } : null, files: pf.filter((f) => f.ref_id === r.id).map(fileView) }))
+    proposals: props.map((r) => ({ id: r.id, fre_id: r.fre_id, name: r.name, photo: r.photo_file || 0, title: r.fre_title, city: r.city, rating: r.rating_count ? +(r.rating_sum / r.rating_count).toFixed(1) : 0, reviews: r.rating_count, jobs_done: r.jobs_done, price: r.price, days: r.days, note: r.note, status: r.status, created_at: r.created_at, thread_id: r.thread_id, cv: r.cv_file ? { id: r.cv_file, name: r.cv_name } : null, files: pf.filter((f) => f.ref_id === r.id).map(fileView) }))
   };
 });
 on('POST', 'myjobs/:id/close', async (c, p) => {
@@ -675,7 +769,7 @@ on('POST', 'myjobs/:id/close', async (c, p) => {
 
 /* ---------- freelancers ---------- */
 function proView(r) {
-  return { id: r.id, name: r.name, title: r.title, cat: r.cat, city: r.city, rating: r.rating_count ? +(r.rating_sum / r.rating_count).toFixed(1) : 0, reviews: r.rating_count, jobs_done: r.jobs_done, rate_from: r.rate_from, skills: parseList(r.skills), about: r.about, since: r.created_at };
+  return { id: r.id, name: r.name, photo: r.photo_file || 0, username: r.username || '', title: r.title, cat: r.cat, city: r.city, rating: r.rating_count ? +(r.rating_sum / r.rating_count).toFixed(1) : 0, reviews: r.rating_count, jobs_done: r.jobs_done, rate_from: r.rate_from, skills: parseList(r.skills), about: r.about, since: r.created_at };
 }
 on('GET', 'freelancers', async (c) => {
   const where = ["cat != ''", "status = 'active'"], args = [];
@@ -689,6 +783,7 @@ on('GET', 'freelancers', async (c) => {
 on('GET', 'freelancers/:id', async (c, p) => {
   const r = await c.db.prepare("SELECT * FROM users WHERE id = ? AND cat != '' AND status = 'active'").bind(int(p.id)).first();
   if (!r) fail(404, 'Freelancer not found.');
+  if (!r.username) await ensureUsername(c, r);
   const reviews = (await c.db.prepare('SELECT r.stars, r.note, r.created_at, u.name, u.business, c.title FROM reviews r JOIN users u ON u.id = r.client_id JOIN contracts c ON c.id = r.contract_id WHERE r.fre_id = ? ORDER BY r.id DESC LIMIT 10').bind(r.id).all()).results;
   const pv = proView(r);
   pv.cv = r.cv_file ? (c.user ? { id: r.cv_file, name: r.cv_name } : { locked: true }) : null;
@@ -839,9 +934,9 @@ async function sysMessage(c, t, text, toClient, toFre) {
 }
 on('GET', 'threads', async (c) => {
   const u = need(c), cli = u.role === 'cli';
-  const rows = (await c.db.prepare('SELECT t.*, j.title AS job_title, o.name AS other_name, o.business AS other_business, k.stage FROM threads t JOIN jobs j ON j.id = t.job_id JOIN users o ON o.id = ' + (cli ? 't.fre_id' : 't.client_id') + ' LEFT JOIN contracts k ON k.thread_id = t.id WHERE ' + (cli ? 't.client_id' : 't.fre_id') + ' = ? ORDER BY t.last_at DESC LIMIT 200').bind(u.id).all()).results;
+  const rows = (await c.db.prepare('SELECT t.*, j.title AS job_title, o.name AS other_name, o.business AS other_business, o.photo_file AS other_photo, k.stage FROM threads t JOIN jobs j ON j.id = t.job_id JOIN users o ON o.id = ' + (cli ? 't.fre_id' : 't.client_id') + ' LEFT JOIN contracts k ON k.thread_id = t.id WHERE ' + (cli ? 't.client_id' : 't.fre_id') + ' = ? ORDER BY t.last_at DESC LIMIT 200').bind(u.id).all()).results;
   return {
-    threads: rows.map((t) => ({ id: t.id, job_id: t.job_id, job: t.job_title, other: cli ? t.other_name : (t.other_business || t.other_name), last_text: t.last_text, last_at: t.last_at, mine: t.last_sender === u.id, unread: cli ? t.client_unread : t.fre_unread, stage: t.stage || null }))
+    threads: rows.map((t) => ({ id: t.id, job_id: t.job_id, job: t.job_title, other: cli ? t.other_name : (t.other_business || t.other_name), other_photo: t.other_photo || 0, last_text: t.last_text, last_at: t.last_at, mine: t.last_sender === u.id, unread: cli ? t.client_unread : t.fre_unread, stage: t.stage || null }))
   };
 });
 on('POST', 'threads', async (c) => {
@@ -869,8 +964,8 @@ on('GET', 'threads/:id', async (c, p) => {
   if (t.side === 'client' && t.client_unread) await c.db.prepare('UPDATE threads SET client_unread = 0 WHERE id = ?').bind(t.id).run();
   if (t.side === 'fre' && t.fre_unread) await c.db.prepare('UPDATE threads SET fre_unread = 0 WHERE id = ?').bind(t.id).run();
   const [cl, fr, k] = await c.db.batch([
-    c.db.prepare('SELECT id, name, business FROM users WHERE id = ?').bind(t.client_id),
-    c.db.prepare('SELECT id, name, title FROM users WHERE id = ?').bind(t.fre_id),
+    c.db.prepare('SELECT id, name, business, photo_file FROM users WHERE id = ?').bind(t.client_id),
+    c.db.prepare('SELECT id, name, title, photo_file FROM users WHERE id = ?').bind(t.fre_id),
     c.db.prepare('SELECT * FROM contracts WHERE thread_id = ?').bind(t.id)
   ]);
   const client = cl.results[0], fre = fr.results[0], contract = k.results[0];
@@ -882,7 +977,7 @@ on('GET', 'threads/:id', async (c, p) => {
     if (t.side === 'client') kv.client_fee = contract.client_fee;
   }
   return {
-    thread: { id: t.id, job_id: t.job_id, job: t.job_title, job_status: t.job_status, side: t.side, client: { id: client.id, name: client.business || client.name, person: client.name }, fre: { id: fre.id, name: fre.name, title: fre.title }, contract: kv },
+    thread: { id: t.id, job_id: t.job_id, job: t.job_title, job_status: t.job_status, side: t.side, client: { id: client.id, name: client.business || client.name, person: client.name, photo: client.photo_file || 0 }, fre: { id: fre.id, name: fre.name, title: fre.title, photo: fre.photo_file || 0 }, contract: kv },
     messages: msgs.map((m) => ({ id: m.id, me: m.sender_id === c.user.id, system: m.sender_id === 0, from: m.sender_id === client.id ? 'client' : m.sender_id === fre.id ? 'fre' : 'system', body: m.body, created_at: m.created_at, files: mf.filter((f) => f.ref_id === m.id).map(fileView) }))
   };
 });
@@ -977,8 +1072,8 @@ async function autoRelease(c) {
 }
 on('GET', 'contracts', async (c) => {
   const u = need(c);
-  const rows = (await c.db.prepare('SELECT k.id, k.title, k.amount, k.stage, k.due_at, k.thread_id, k.fre_fee_pct, k.fre_fee, k.closed_at, u.name AS client_name, u.business FROM contracts k JOIN users u ON u.id = k.client_id WHERE k.fre_id = ? ORDER BY k.id DESC LIMIT 200').bind(u.id).all()).results;
-  return { contracts: rows.map((k) => ({ id: k.id, title: k.title, amount: k.amount, net: k.amount - (k.fre_fee || Math.round(k.amount * k.fre_fee_pct / 100)), stage: k.stage, due_at: k.due_at, closed_at: k.closed_at, thread_id: k.thread_id, client: k.business || k.client_name })) };
+  const rows = (await c.db.prepare('SELECT k.id, k.title, k.amount, k.stage, k.due_at, k.thread_id, k.fre_fee_pct, k.fre_fee, k.closed_at, u.name AS client_name, u.business, u.photo_file AS client_photo FROM contracts k JOIN users u ON u.id = k.client_id WHERE k.fre_id = ? ORDER BY k.id DESC LIMIT 200').bind(u.id).all()).results;
+  return { contracts: rows.map((k) => ({ id: k.id, title: k.title, amount: k.amount, net: k.amount - (k.fre_fee || Math.round(k.amount * k.fre_fee_pct / 100)), stage: k.stage, due_at: k.due_at, closed_at: k.closed_at, thread_id: k.thread_id, client: k.business || k.client_name, client_photo: k.client_photo || 0 })) };
 });
 on('POST', 'contracts/:id/deliver', async (c, p) => {
   const u = need(c), k = await contractFor(c, p.id), sn = scrub(str(c.body.note, 2000)), note = sn.text;
@@ -1048,13 +1143,22 @@ on('POST', 'contracts/:id/review', async (c, p) => {
 on('GET', 'wallet', async (c) => {
   const u = need(c), s = await settings(c);
   const [ledger, tops, wds] = await c.db.batch([
-    c.db.prepare('SELECT id, kind, label, amount, info, created_at FROM ledger WHERE user_id = ? ORDER BY id DESC LIMIT 100').bind(u.id),
+    c.db.prepare('SELECT id, kind, label, amount, info, ref, created_at FROM ledger WHERE user_id = ? ORDER BY id DESC LIMIT 100').bind(u.id),
     c.db.prepare("SELECT id, amount, ref, status, note, created_at FROM topups WHERE user_id = ? AND (status = 'pending' OR created_at > ?) ORDER BY id DESC LIMIT 10").bind(u.id, now() - 14 * DAY),
     c.db.prepare("SELECT id, amount, status, note, created_at FROM withdrawals WHERE user_id = ? AND (status = 'pending' OR created_at > ?) ORDER BY id DESC LIMIT 10").bind(u.id, now() - 30 * DAY)
   ]);
   const w = await walletNums(c, u.id);
+  const rows = ledger.results || [];
+  const jobIds = Array.from(new Set(rows.map((r) => String(r.ref || '').match(/^(?:escrow|fee):(\d+)$/)).filter(Boolean).map((m) => int(m[1]))));
+  const byJob = {};
+  if (jobIds.length) ((await c.db.prepare('SELECT id, job_id FROM contracts WHERE job_id IN (' + jobIds.map(() => '?').join(',') + ')').bind(...jobIds).all()).results || []).forEach((k) => { byJob[k.job_id] = k.id; });
+  rows.forEach((r) => {
+    const m = String(r.ref || '').match(/^([a-z-]+):(\d+)$/), k = m ? m[1] : '', n = m ? m[2] : '';
+    r.receipt = k === 'topup' ? 'topup-' + n : (k === 'withdraw' || k === 'wdback') ? 'withdrawal-' + n : (k === 'release' || k === 'release-c' || k === 'refund') ? 'contract-' + n : (k === 'escrow' || k === 'fee') && byJob[n] ? 'contract-' + byJob[n] : '';
+    delete r.ref;
+  });
   return {
-    avail: u.avail, escrow_out: w.escrow_out, escrow_in: w.escrow_in, ledger: ledger.results, topups: tops.results, withdrawals: wds.results,
+    avail: u.avail, escrow_out: w.escrow_out, escrow_in: w.escrow_in, ledger: rows, topups: tops.results, withdrawals: wds.results,
     bank: { name: u.bank_name, acct: u.bank_acct, holder: u.bank_holder },
     company_bank: { name: s.bank_name, acct: s.bank_acct, holder: s.bank_holder }
   };
@@ -1081,7 +1185,7 @@ on('POST', 'withdrawals', async (c) => {
     await c.db.batch([
       c.db.prepare('UPDATE users SET avail = avail - ? WHERE id = ?').bind(amount, u.id),
       c.db.prepare('INSERT INTO withdrawals (user_id, amount, bank_name, bank_acct, bank_holder, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(u.id, amount, u.bank_name, u.bank_acct, u.bank_holder, ts),
-      c.db.prepare('INSERT INTO ledger (user_id, kind, label, amount, created_at) VALUES (?, ?, ?, ?, ?)').bind(u.id, 'withdraw', 'Withdrawal to ' + u.bank_name + ' ••' + u.bank_acct.slice(-4), -amount, ts)
+      c.db.prepare("INSERT INTO ledger (user_id, kind, label, amount, ref, created_at) VALUES (?, ?, ?, ?, 'withdraw:' || (SELECT MAX(id) FROM withdrawals WHERE user_id = ?), ?)").bind(u.id, 'withdraw', 'Withdrawal to ' + u.bank_name + ' ••' + u.bank_acct.slice(-4), -amount, u.id, ts)
     ]);
   } catch (e) { if (isCheck(e)) fail(400, 'Your balance is too low for that amount.'); throw e; }
   return { ok: true };
@@ -1311,15 +1415,15 @@ on('POST', 'files', async (c) => {
   const u = need(c);
   if (!c.env.FILES) fail(503, 'File uploads aren’t switched on yet.');
   const kind = c.q.get('kind');
-  if (['cv', 'proposal', 'message', 'portfolio'].indexOf(kind) < 0) bad('Unknown upload.');
+  if (['cv', 'proposal', 'message', 'portfolio', 'avatar'].indexOf(kind) < 0) bad('Unknown upload.');
   let name = '';
   try { name = decodeURIComponent(c.req.headers.get('x-file-name') || ''); } catch (e) { name = ''; }
   name = name.replace(/[\u0000-\u001f\\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(-120) || 'file';
   const ext = ((name.match(/\.([a-z0-9]{1,5})$/i) || [])[1] || '').toLowerCase();
   if (!FILE_TYPES[ext]) fail(415, 'That file type isn’t allowed. Use PDF, Word, Excel, PowerPoint, images, ZIP or MP4.');
   if (kind === 'cv' && ['pdf', 'doc', 'docx'].indexOf(ext) < 0) fail(415, 'Upload your CV as a PDF or Word file.');
-  if (kind === 'portfolio' && ['png', 'jpg', 'jpeg', 'webp', 'gif'].indexOf(ext) < 0) fail(415, 'Use a picture: JPG, PNG, WebP or GIF.');
-  const max = kind === 'cv' || kind === 'portfolio' ? 5 * 1048576 : 20 * 1048576;
+  if ((kind === 'portfolio' || kind === 'avatar') && ['png', 'jpg', 'jpeg', 'webp', 'gif'].indexOf(ext) < 0) fail(415, 'Use a picture: JPG, PNG, WebP or GIF.');
+  const max = kind === 'cv' || kind === 'portfolio' || kind === 'avatar' ? 5 * 1048576 : 20 * 1048576;
   if (int(c.req.headers.get('content-length')) > max) fail(413, 'That file is too big. The limit is ' + (max / 1048576) + ' MB.');
   const recent = await c.db.prepare('SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND created_at > ?').bind(u.id, now() - DAY).first();
   if (recent.n >= 80) fail(429, 'You’ve uploaded a lot today. Try again tomorrow.');
@@ -1348,7 +1452,8 @@ async function canRead(c, f) {
 on('GET', 'files/:id', async (c, p) => {
   if (!c.env.FILES) fail(503, 'File uploads aren’t switched on yet.');
   const f = await c.db.prepare('SELECT * FROM files WHERE id = ?').bind(int(p.id)).first();
-  if (!f || f.scope !== 'portfolio') { need(c); if (!f || !(await canRead(c, f))) fail(404, 'File not found.'); }
+  const pub = !!f && (f.scope === 'portfolio' || f.scope === 'avatar');
+  if (!pub) { need(c); if (!f || !(await canRead(c, f))) fail(404, 'File not found.'); }
   const obj = await c.env.FILES.get(f.key);
   if (!obj) fail(404, 'File not found.');
   const ascii = f.name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, "'");
@@ -1356,7 +1461,7 @@ on('GET', 'files/:id', async (c, p) => {
     headers: {
       'content-type': f.type,
       'content-disposition': (SHOWABLE.test(f.type) ? 'inline' : 'attachment') + '; filename="' + ascii + '"; filename*=UTF-8\'\'' + encodeURIComponent(f.name),
-      'cache-control': f.scope === 'portfolio' ? 'public, max-age=86400' : 'private, max-age=3600',
+      'cache-control': pub ? 'public, max-age=86400' : 'private, max-age=3600',
       'x-content-type-options': 'nosniff'
     }
   });
