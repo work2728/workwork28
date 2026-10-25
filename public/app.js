@@ -31,7 +31,7 @@
   window.addEventListener('hashchange', function () { S.navs++; router(); });
 
   function router(keep) {
-    stopPoll(); if (!keep) closeModal();
+    stopPoll(); closeDrawer(); if (!keep) closeModal();
     var h = parseHash(), name = h.path[0] || '', arg = h.path[1] || '';
     if (!name || !V[name]) name = home();
     var v = V[name];
@@ -39,7 +39,7 @@
     if (v.need === 'fre' && role() !== 'fre') return go(home());
     if (v.need === 'cli' && role() !== 'cli') return go(home());
     if (v.guest && U()) return go(home());
-    if (needsSetup() && ['setup', 'terms', 'privacy', 'verify', 'reset'].indexOf(name) < 0) { if (S.view === 'setup' && $('#f-profile')) { toast('Finish your profile first.'); history.replaceState(null, '', '#/setup'); return; } return go('setup'); }
+    if (needsSetup() && ['setup', 'terms', 'privacy', 'verify', 'reset', 'how', 'pricing', 'about', 'help'].indexOf(name) < 0) { if (S.view === 'setup' && $('#f-profile')) { toast('Finish your profile first.'); history.replaceState(null, '', '#/setup'); return; } return go('setup'); }
     if (name === 'setup' && U() && !needsSetup()) return go('edit-profile');
     var y = window.scrollY, changed = S.view !== name || S.arg !== arg;
     S.view = name; S.arg = arg; S.qs = h.qs;
@@ -751,7 +751,7 @@
         mitem('bank', 'Bank account', u.bank.acct ? esc(u.bank.name) + ' •••• ' + esc(u.bank.acct.slice(-4)) : 'Not added yet', 'data-act="bank"') +
         mitem(cliR ? 'laptop' : 'briefcase', cliR ? 'Switch to freelancing' : 'Switch to hiring', cliR ? 'Find work with the same account' : 'Post jobs with the same account', 'data-act="switch" data-v="' + (cliR ? 'fre' : 'cli') + '"') +
         (S.me.mail ? mitem('bell', 'Email alerts', u.email_alerts ? 'On for messages and proposals' : 'Off. Payment emails still come', 'data-act="alerts"') : '') +
-        mitem('help', 'How payment works', '', 'data-act="help"') + mitem('doc', 'Terms and rules', '', 'href="#/terms"') + mitem('shield', 'Privacy policy', 'How we use and protect your data', 'href="#/privacy"') +
+        mitem('help', 'Help and FAQ', 'How payments, escrow and fees work', 'href="#/help"') + mitem('doc', 'Terms and rules', '', 'href="#/terms"') + mitem('shield', 'Privacy policy', 'How we use and protect your data', 'href="#/privacy"') +
         (S.me.support_whatsapp ? mitem('whatsapp', 'Contact support', 'WhatsApp', 'href="https://wa.me/' + esc(waNum(S.me.support_whatsapp)) + '" target="_blank" rel="noopener"') : '') +
         (S.me.is_admin ? mitem('gear', 'Admin panel', 'Top-ups, withdrawals, disputes', 'href="/admin"') : '') +
         mitem('logout', 'Log out', '', 'data-act="signout"') + '</ul></div>';
@@ -816,6 +816,140 @@
     }
   };
 
+  /* ---------- public pages: how it works, pricing, about, help ---------- */
+  ICONS.menu = '<path d="M4 7h16M4 12h16M4 17h16"/>';
+  function pricingData() { return S.pricing ? Promise.resolve(S.pricing) : api('GET', 'pricing').then(function (p) { S.pricing = p; return p; }); }
+  function joinBtn(r, label, cls) {
+    if (U()) return r === 'cli' ? '<a class="btn ' + (cls || 'btn-primary') + '" href="#/post">' + label + '</a>' : '<a class="btn ' + (cls || 'btn-primary') + '" href="#/' + home() + '">' + label + '</a>';
+    return '<button type="button" class="btn ' + (cls || 'btn-primary') + '" data-act="join" data-v="' + r + '">' + label + '</button>';
+  }
+  function pageHead(eyebrow, title, lead) { return '<header class="pp-head"><p class="eyebrow">' + eyebrow + '</p><h1 class="pp-title">' + title + '</h1>' + (lead ? '<p class="pp-lead">' + lead + '</p>' : '') + '</header>'; }
+  function stepList(items) { return '<ol class="pp-steps">' + items.map(function (it) { return '<li><h3>' + it[0] + '</h3><p>' + it[1] + '</p></li>'; }).join('') + '</ol>'; }
+  function checkList(items) { return '<ul class="pp-checks">' + items.map(function (x) { return '<li>' + ic('tick') + '<span>' + x + '</span></li>'; }).join('') + '</ul>'; }
+  function faq(items) { return '<div class="faq">' + items.map(function (q) { return '<details><summary>' + q[0] + '</summary><p>' + q[1] + '</p></details>'; }).join('') + '</div>'; }
+  function waBox(title, body) {
+    var wa = S.me.support_whatsapp || (S.pricing && S.pricing.support_whatsapp);
+    return '<section class="pp-contact"><div><h2>' + title + '</h2><p>' + body + '</p></div>' + (wa ? '<a class="btn btn-primary" href="https://wa.me/' + esc(waNum(wa)) + '" target="_blank" rel="noopener">' + ic('whatsapp') + 'Chat with us on WhatsApp</a>' : '') + '</section>';
+  }
+  V.how = {
+    title: function () { return 'How it works'; },
+    load: pricingData,
+    html: function (p) {
+      var fre = (S.howtab || (role() === 'fre' ? 'fre' : 'cli')) === 'fre';
+      return '<div class="wrap scr pp">' + pageHead('How it works', 'Hire or get hired, with your money protected', 'PadiHire holds the payment in escrow from the moment a freelancer is hired until the client approves the work.') +
+        utabs('howtab', [['cli', 'For clients'], ['fre', 'For freelancers']], fre ? 'fre' : 'cli') +
+        (fre ? stepList([
+          ['Create a free profile', 'Choose your category and skills, write a short bio and add your CV and portfolio. Clients see this when you apply.'],
+          ['Send proposals', 'Find jobs that fit you and send your price, how long you need and samples of your work. You get ' + p.monthly_proposals + ' proposals every month.'],
+          ['Start when the money is safe', 'When a client hires you, they have already paid into escrow. You can see the money is there before you start.'],
+          ['Deliver and get paid', 'Deliver in the PadiHire chat. When the client approves, the money moves to your wallet and you can withdraw it to your bank.']
+        ]) + '<div class="pp-cta">' + joinBtn('fre', 'Create a free profile') + '<a class="link-btn" href="#/jobs">See the latest jobs</a></div>'
+          : stepList([
+          ['Post a job for free', 'Say what you need, your budget and when you need it done. It takes about two minutes.'],
+          ['Compare proposals', 'Freelancers send their price, timeline and samples. Chat with them on PadiHire before you decide.'],
+          ['Hire and pay into escrow', 'Add money to your wallet and hire. PadiHire holds the payment safely while the work is being done.'],
+          ['Approve and release payment', 'Check the work in the chat. Ask for changes, or approve to release the payment to the freelancer.']
+        ]) + '<div class="pp-cta">' + joinBtn('cli', 'Post a job for free') + '<a class="link-btn" href="#/freelancers">Browse freelancers</a></div>') +
+        '<section class="pp-box"><h2>' + ic('shield') + 'How your money is protected</h2>' + checkList([
+          'The client pays before the work starts, and PadiHire holds the money, not the freelancer.',
+          'If the client doesn’t respond within ' + p.auto_release_days + ' days of delivery, the payment is released to the freelancer automatically.',
+          'If something goes wrong, either side can open a dispute. PadiHire reads the chat and decides whether to release or refund.',
+          'Phone numbers and talk of paying outside PadiHire are hidden in chats, so nobody loses this protection by accident.'
+        ]) + '</section></div>';
+    }
+  };
+  V.pricing = {
+    title: function () { return 'Pricing'; },
+    load: pricingData,
+    html: function (p) {
+      var fre = (S.pricetab || (role() === 'fre' ? 'fre' : 'cli')) === 'fre';
+      var ex = 50000, cfee = Math.round(ex * p.client_fee_pct / 100), ffee = Math.round(ex * p.fre_fee_pct / 100);
+      var card = fre
+        ? '<section class="price-card"><h2>For freelancers</h2><p class="price-big">' + p.fre_fee_pct + '%<span>of what you earn on each job</span></p>' +
+          '<div class="price-ex"><span>Win a ' + naira(ex) + ' job</span><b>You receive ' + naira(ex - ffee) + '</b><small>' + naira(ffee) + ' PadiHire fee</small></div>' +
+          checkList(['Free to join, with a free profile and portfolio', p.monthly_proposals + ' proposals every month, free', 'The client pays into escrow before you start', 'Withdraw your earnings to a Nigerian bank account', 'No fee to send proposals or chat with clients']) +
+          joinBtn('fre', 'Create a free profile', 'btn-primary full') + '</section>'
+        : '<section class="price-card"><h2>For clients</h2><p class="price-big">' + p.client_fee_pct + '%<span>service fee, only when you hire</span></p>' +
+          '<div class="price-ex"><span>Hire a freelancer for ' + naira(ex) + '</span><b>You pay ' + naira(ex + cfee) + '</b><small>' + naira(ex) + ' for the work + ' + naira(cfee) + ' service fee</small></div>' +
+          checkList(['Post jobs for free', 'Get proposals and chat with freelancers for free', 'Your payment stays in escrow until you approve the work', 'Ask for changes, or open a dispute if something goes wrong', 'Help from a real person on WhatsApp']) +
+          joinBtn('cli', 'Post a job for free', 'btn-primary full') + '</section>';
+      return '<div class="wrap scr pp">' + pageHead('Pricing', 'Free to join. Pay only when work happens.', 'Posting jobs, creating a profile, sending proposals and chatting are all free. PadiHire charges a small fee only when someone is hired.') +
+        utabs('pricetab', [['cli', 'For clients'], ['fre', 'For freelancers']], fre ? 'fre' : 'cli') + card +
+        '<h2 class="pp-h2">Questions about fees</h2>' + faq([
+          ['When is the fee charged?', 'Clients pay the service fee when they hire, together with the price of the work. Freelancers’ fee is taken when the payment is released to them.'],
+          ['Is there a monthly subscription?', 'No. There’s nothing to pay until someone is hired.'],
+          ['What happens to fees if a job is refunded?', 'If PadiHire refunds a job after a dispute, the freelancer isn’t paid, so no freelancer fee is taken. The client’s service fee may also be refunded, depending on the decision.'],
+          ['Can I see the fee before I commit?', 'Yes. Clients see the total before they hire, and freelancers see what they’ll receive before they send a proposal.']
+        ]) + '</div>';
+    }
+  };
+  V.about = {
+    title: function () { return 'About PadiHire'; },
+    load: pricingData,
+    html: function () {
+      return '<div class="wrap scr pp">' + pageHead('About PadiHire', 'Freelance work Nigerians can trust', 'PadiHire is a freelance marketplace for Nigeria. We help businesses find skilled freelancers for design, writing, websites, video, social media and admin work, and we help freelancers get paid safely for their skills.') +
+        '<section class="pp-sec"><h2>Why we built PadiHire</h2><p>Hiring online in Nigeria often runs on trust alone. Clients pay upfront and hope the work arrives. Freelancers deliver and hope they get paid. PadiHire puts escrow in the middle: the client’s money is held safely until the work is approved, so both sides can get on with the job.</p></section>' +
+        '<section class="pp-sec"><h2>What we stand for</h2><div class="pp-grid">' +
+          '<div class="pp-card">' + ic('shield') + '<h3>Safe payments</h3><p>Every job is paid into escrow before work starts.</p></div>' +
+          '<div class="pp-card">' + ic('wallet') + '<h3>Fair, simple fees</h3><p>Free to join and free to post. A small fee only when someone is hired.</p></div>' +
+          '<div class="pp-card">' + ic('pin') + '<h3>Built for Nigeria</h3><p>Naira prices, Nigerian bank accounts, and people in all 36 states and the FCT.</p></div>' +
+          '<div class="pp-card">' + ic('chat') + '<h3>Real support</h3><p>Questions or problems go to a real person on WhatsApp.</p></div>' +
+        '</div></section>' +
+        '<div class="pp-cta">' + joinBtn('cli', 'Hire talent') + joinBtn('fre', 'Find work', 'btn-ghost') + '</div>' +
+        waBox('Talk to us', 'Questions about PadiHire, partnerships or press? Send us a message.') + '</div>';
+    }
+  };
+  V.help = {
+    title: function () { return 'Help and FAQ'; },
+    load: pricingData,
+    html: function (p) {
+      return '<div class="wrap scr pp">' + pageHead('Help', 'Help and FAQ', 'Quick answers to the questions people ask most.') +
+        '<h2 class="pp-h2">Payments</h2>' + faq([
+          ['How does escrow work?', 'When a client hires a freelancer, the agreed price is held by PadiHire. The freelancer delivers in the chat, and when the client approves, the money is released to the freelancer’s wallet. If the client doesn’t respond within ' + p.auto_release_days + ' days of delivery, it’s released automatically.'],
+          ['How do I add money to my wallet?', 'Go to your wallet, tap Add money and make a bank transfer using the reference shown. Your wallet updates once PadiHire confirms the transfer.'],
+          ['How do I withdraw my earnings?', 'Add your bank account in your profile, then go to your wallet and tap Withdraw. The account must be in your own name.'],
+          ['What if I’m not happy with the work?', 'Ask for changes in the chat first. If you still can’t agree, open a dispute. The money stays in escrow while PadiHire reviews the chat and decides.']
+        ]) +
+        '<h2 class="pp-h2">Your account</h2>' + faq([
+          ['Can I be a client and a freelancer?', 'Yes. Use the same account and switch between hiring and freelancing from the Me page.'],
+          ['I forgot my password', 'Tap “Forgot your password?” on the log in page. If you can’t get in, message us on WhatsApp.'],
+          ['Why are phone numbers hidden in chats?', 'Deals made outside PadiHire lose escrow protection, and that’s where most scams happen. So phone numbers, emails, social handles and talk of paying outside PadiHire are hidden in chats.'],
+          ['How do I report a scam or a fake job?', 'Use the Report button on the job, or message us on WhatsApp with the details. Never pay anyone to apply for a job.']
+        ]) + waBox('Still need help?', 'Message PadiHire support on WhatsApp and a real person will help you.') + '</div>';
+    }
+  };
+  var VNAV = [['freelancers', 'Hire talent'], ['jobs', 'Find work'], ['how', 'How it works'], ['pricing', 'Pricing']];
+  function drawerHtml() {
+    var key = navKey(S.view);
+    function item(href, icon, title, sub) { return '<a class="dr-item" href="' + href + '"' + (href === '#/' + key ? ' aria-current="page"' : '') + '>' + ic(icon) + '<span><strong>' + title + '</strong>' + (sub ? '<small>' + sub + '</small>' : '') + '</span></a>'; }
+    return '<div class="dr-backdrop" data-act="menu-close"></div><nav class="dr-panel" role="dialog" aria-modal="true" aria-label="Menu">' +
+      '<div class="dr-top">' + brandHtml('#/', 'PadiHire home') + '<button type="button" class="dr-x" data-act="menu-close" aria-label="Close menu">' + ic('close') + '</button></div>' +
+      '<div class="dr-body">' +
+      item('#/freelancers', 'users', 'Hire talent', 'Browse freelancers across Nigeria') +
+      item('#/jobs', 'search', 'Find work', 'See the latest jobs') +
+      item('#/how', 'help', 'How it works', 'Hiring and getting paid, step by step') +
+      item('#/pricing', 'wallet', 'Pricing', 'Free to join, small fee when you hire') +
+      item('#/about', 'shield', 'About PadiHire', '') +
+      item('#/help', 'chat', 'Help and FAQ', '') +
+      '<p class="dr-label">Browse by category</p><div class="dr-cats">' + CATS.map(function (c) { return '<a href="#/jobs?cat=' + c.id + '">' + esc(c.short) + '</a>'; }).join('') + '</div>' +
+      '</div><div class="dr-foot"><button type="button" class="btn btn-primary full" data-act="join">Sign up</button><a class="btn btn-ghost full" href="#/login">Log in</a>' +
+      '<p class="dr-legal"><a href="#/terms">Terms</a><a href="#/privacy">Privacy</a></p></div></nav>';
+  }
+  function openDrawer() {
+    var d = $('#drawer');
+    if (!d) { document.body.insertAdjacentHTML('beforeend', '<div id="drawer" class="drawer" hidden></div>'); d = $('#drawer'); }
+    d.innerHTML = drawerHtml(); d.hidden = false; document.body.style.overflow = 'hidden';
+    requestAnimationFrame(function () { d.classList.add('open'); });
+    var b = $('.menu-btn'); if (b) b.setAttribute('aria-expanded', 'true');
+    var x = $('#drawer .dr-x'); if (x) x.focus();
+  }
+  function closeDrawer() {
+    var d = $('#drawer'); if (!d || d.hidden) return;
+    d.classList.remove('open'); d.hidden = true; document.body.style.overflow = '';
+    var b = $('.menu-btn'); if (b) { b.setAttribute('aria-expanded', 'false'); if (document.activeElement === document.body || !document.activeElement) b.focus(); }
+  }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });
+
   /* ---------- chrome ---------- */
   var NAV = {
     visitor: [['explore', 'Home', 'home'], ['jobs', 'Jobs', 'search'], ['freelancers', 'Freelancers', 'users'], ['login', 'Log in', 'user']],
@@ -838,12 +972,15 @@
     function badge(id) { var n = id === 'messages' ? S.me.unread : id === 'dash' ? S.me.waiting : 0; return n ? '<span class="count">' + n + '</span>' : ''; }
     var right = !u ? '<a class="login" href="#/login">Log in</a><button type="button" class="btn btn-primary btn-sm" data-act="join">Sign up</button>'
       : '<a class="me-btn" href="#/account" aria-label="Your account"' + (S.view === 'account' ? ' aria-current="page"' : '') + '>' + face(u.name) + '</a>';
-    $('#top').innerHTML = '<div class="wrap top-in">' + brandHtml('#/', 'PadiHire home') +
-      '<nav class="nav" aria-label="Main">' + items.filter(function (it) { return it[0] !== 'login' && it[0] !== 'account'; }).map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
+    var navItems = u ? items.filter(function (it) { return it[0] !== 'login' && it[0] !== 'account'; }) : VNAV;
+    $('#top').innerHTML = '<div class="wrap top-in">' + (u ? '' : '<button type="button" class="menu-btn" data-act="menu" aria-label="Open menu" aria-expanded="false" aria-controls="drawer">' + ic('menu') + '</button>') + brandHtml('#/', 'PadiHire home') +
+      '<nav class="nav" aria-label="Main">' + navItems.map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
       '<div class="top-right">' + right + '</div></div>';
+    document.body.classList.toggle('guest', !u);
     footer();
     document.body.classList.toggle('hero-top', S.view === 'explore' && !u);
     var tabs = $('#tabs'); tabs.style.setProperty('--n', items.length);
+    if (!u) { tabs.innerHTML = ''; return; }
     tabs.innerHTML = items.map(function (it) {
       var cur = it[0] === key ? ' aria-current="page"' : '';
       if (it[0] === 'post') return '<a class="fab" href="#/post"' + cur + '><span class="fab-c">' + ic('plus') + '</span>Post</a>';
@@ -853,7 +990,7 @@
   function footer() {
     var f = $('#foot'), on = !U();
     f.classList.toggle('foot-min', !on);
-    f.innerHTML = on ? '<div class="wrap foot"><p>© ' + new Date().getFullYear() + ' PadiHire · Freelance work and talent in Nigeria</p><p class="foot-links"><a class="link-btn" href="#/terms">Terms</a><a class="link-btn" href="#/privacy">Privacy</a><button type="button" class="link-btn" data-act="help">How payment works</button></p></div>' : '';
+    f.innerHTML = on ? '<div class="wrap foot"><p>© ' + new Date().getFullYear() + ' PadiHire · Freelance work and talent in Nigeria</p><p class="foot-links"><a class="link-btn" href="#/how">How it works</a><a class="link-btn" href="#/pricing">Pricing</a><a class="link-btn" href="#/about">About</a><a class="link-btn" href="#/help">Help</a><a class="link-btn" href="#/terms">Terms</a><a class="link-btn" href="#/privacy">Privacy</a></p></div>' : '';
   }
 
   /* ---------- modals ---------- */
@@ -949,6 +1086,7 @@
       case 'tab':
         S[el.getAttribute('data-tab')] = v; S.picked = S.picked || {}; S.picked[el.getAttribute('data-tab')] = 1;
         if (el.getAttribute('data-tab') === 'wtab' || el.getAttribute('data-tab') === 'xmode') router(true); else rerender();
+        if (['howtab', 'pricetab'].indexOf(el.getAttribute('data-tab')) >= 0) { var tb = $('.utabs [aria-selected="true"]'); if (tb) tb.focus(); }
         break;
       case 'join': closeModal(); S.join = { step: v ? 2 : 1, role: v || null }; go('join'); break;
       case 'pick-role': S.join.role = v; rerender(); break;
@@ -970,6 +1108,8 @@
       case 'tog': var k = el.getAttribute('data-k'); S.q[k] = S.q[k] ? '' : '1'; el.setAttribute('aria-pressed', String(!!S.q[k])); reloadResults(); break;
       case 'clear': S.q = blankQ(); go('jobs'); break;
       case 'pcat': S.pcat = v; location.hash = '#/freelancers?cat=' + v + (S.pq ? '&q=' + encodeURIComponent(S.pq) : ''); break;
+      case 'menu': openDrawer(); break;
+      case 'menu-close': closeDrawer(); break;
       case 'verify-resend':
         api('POST', 'me/verify').then(function (r) { if (r.already) { loadMe().then(function () { router(true); }); toast('Your email is already confirmed'); } else toast('Sent. Check your inbox and spam folder.'); }, function (er) { toast(er.message); });
         break;
