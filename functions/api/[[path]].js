@@ -191,7 +191,7 @@ function mailHtml(heading, paras, btn, foot) {
   return '<!doctype html><html><body style="margin:0;padding:0;background:#f6f4fa;font-family:Arial,Helvetica,sans-serif"><div style="max-width:560px;margin:0 auto;padding:24px 16px">' +
     '<div style="background:#5b21b6;border-radius:14px 14px 0 0;padding:16px 22px;color:#ffffff;font-size:20px;font-weight:800">Fere</div>' +
     '<div style="background:#ffffff;border-radius:0 0 14px 14px;padding:24px 22px"><h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1a1625">' + escH(heading) + '</h1>' + p + b + '</div>' +
-    '<p style="margin:16px 4px 0;font-size:12px;line-height:1.5;color:#625c70">' + escH(f) + '</p></div></body></html>';
+    '<p style="margin:16px 4px 0;font-size:12px;line-height:1.5;color:#625c70">' + escH(f) + '<br>Fere is a service of FERE NG LTD.</p></div></body></html>';
 }
 async function sendMail(c, to, subject, heading, paras, btn, foot) {
   if (!mailOn(c) || !to) return false;
@@ -270,7 +270,7 @@ const SCRUB = [
   [/(^|[^\w@*])@[a-z_][\w.]{2,}/gim, 'social handle'],
   [/\b(?:what'?s\s?ap+|whatsap+|watsap+|wats\s?ap+|wassap+|w\.app|telegram|telegra\.m|snapchat|wechat|signal\s+app|imo\s+app)\b/gi, 'outside app'],
   [/\b(?:call|text|ring|sms|buzz|flash|ping|reach|dm|inbox|message|contact|chat)\s+me\s+(?:on|via|at|through|up|with|privately|directly)\b/gi, 'contact request'],
-  [/\b(?:my|your|ur)\s+(?:phone(?:\s*number)?|mobile(?:\s*number)?|number|digits|line|contacts?|email|e-mail|handle|ig|insta(?:gram)?|socials)\b/gi, 'contact request'],
+  [/\b(?:my|your|ur)\s+(?:phone(?:\s*number)?|mobile(?:\s*number)?|number|digits|line|contacts?|email|e-mail|handle|ig|insta(?:gram)?|socials)\b(?!\s*(?:shop|store|stores|repairs?|accessor(?:y|ies)|business|brand|cases?|screens?|plaza|market|sales|gadgets|of\b|one\b|1\b))/gi, 'contact request'],
   [/\b(?:pay|send|transfer)\s+(?:the\s+)?(?:money\s+|it\s+|me\s+|cash\s+|balance\s+)?(?:directly|outside|straight|privately|to\s+my\s+(?:account|bank|wallet|acct))\b/gi, 'payment outside'],
   [/\b(?:to|into|in)\s+my\s+(?:account|bank|acct|wallet)\b/gi, 'payment outside'],
   [/\b(?:outside|off)\s+(?:of\s+)?(?:the\s+)?(?:app|platform|site|website|fere|padihire|this\s+(?:app|site|platform|website))\b/gi, 'outside platform'],
