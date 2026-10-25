@@ -41,7 +41,7 @@ export async function onRequestGet(ctx) {
       const u = await ctx.env.DB.prepare("SELECT id, name, title, city, about, rate_from, rating_sum, rating_count, jobs_done FROM users WHERE username = ? AND cat != '' AND status = 'active'").bind(name).first();
       if (u) {
         const bits = [u.title || 'Freelancer', u.city || 'Nigeria'];
-        if (u.rating_count) bits.push((u.rating_sum / u.rating_count).toFixed(1) + '★ from ' + u.rating_count + (u.rating_count === 1 ? ' review' : ' reviews'));
+        if (u.rating_count) bits.push('rated ' + (u.rating_sum / u.rating_count).toFixed(1) + ' from ' + u.rating_count + (u.rating_count === 1 ? ' review' : ' reviews'));
         if (u.rate_from) bits.push('jobs from ' + naira(u.rate_from));
         meta = { title: u.name + ' on Fere', desc: clip(bits.join(' · ') + '. ' + (u.about || ''), 200), route: 'freelancer/' + u.id };
       }
