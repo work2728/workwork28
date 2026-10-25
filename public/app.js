@@ -100,7 +100,7 @@
   function rows(list) { return '<div class="rows">' + list.map(jrow).join('') + '</div>'; }
   function stars(r, n) { return n ? '<span class="stars">' + ic('star', 'is') + '<b>' + r.toFixed(1) + '</b> (' + n + ')</span>' : '<span>New</span>'; }
   function frow(p) {
-    return '<article class="frow">' + face(p.name, 'av-md') +
+    return '<article class="frow">' + face(p.name, 'av-md', p.photo) +
       '<div class="fr-main"><h3 class="fr-name"><a class="jr-link" href="#/freelancer/' + p.id + '">' + esc(p.name) + '</a></h3>' +
       '<p class="fr-title">' + esc(p.title || CAT[p.cat].label) + '</p>' +
       '<p class="fr-meta">' + (p.city ? '<span>' + ic('pin') + esc(p.city) + '</span>' : '') + stars(p.rating, p.reviews) + (p.jobs_done ? '<span>' + p.jobs_done + (p.jobs_done === 1 ? ' job' : ' jobs') + '</span>' : '') + '</p></div>' +
@@ -110,6 +110,21 @@
   function catOptions(any) { return '<option value="">' + (any || 'All categories') + '</option>' + CATS.map(function (c) { return '<option value="' + c.id + '">' + esc(c.label) + '</option>'; }).join(''); }
   function cityOptions(any, remote) { return (any ? '<option value="">' + any + '</option>' : '') + (remote ? '<option value="Remote">' + remote + '</option>' : '') + CITIES.map(function (c) { return '<option>' + c + '</option>'; }).join(''); }
   function promo(title, body, btn, r) { return '<div class="promo"><div><h2>' + title + '</h2><p>' + body + '</p></div><button type="button" class="btn btn-dark" data-act="join" data-v="' + r + '">' + btn + '</button></div>'; }
+  function slug(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, ''); }
+  function jobUrl(j) { var sl = slug(j.title); return location.origin + '/j/' + j.id + (sl ? '-' + sl : ''); }
+  function proUrl(p) { return p.username ? location.origin + '/u/' + p.username : location.origin + '/#/freelancer/' + p.id; }
+  function shareBtn(url, title, label) { return '<button type="button" class="btn btn-ghost btn-sm" data-act="share" data-url="' + esc(url) + '" data-title="' + esc(title) + '">' + ic('share') + (label || 'Share') + '</button>'; }
+  function copyText(text, done) {
+    function fallback() {
+      var t = document.createElement('textarea'), ok = false;
+      t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.top = '0'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      t.remove(); toast(ok ? done : text);
+    }
+    try { if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(function () { toast(done); }, fallback); else fallback(); } catch (e) { fallback(); }
+  }
+  function fullDate(ts) { var d = new Date(ts * 1000); return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() + ', ' + timeText(ts).split(' | ')[0]; }
   function sideBox(title, body, link) { return '<section class="side-box">' + (title ? '<h2 class="sb-h">' + title + '</h2>' : '') + body + (link || '') + '</section>'; }
 
   /* ---------- skill picker ---------- */
@@ -235,7 +250,7 @@
     if (!S.tsLoading) { S.tsLoading = true; var sc = document.createElement('script'); sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; sc.async = true; sc.onload = function () { S.tsLoading = false; draw(); }; document.head.appendChild(sc); }
   }
   function greet() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
-  function hello(sub, title, extra) { return '<div class="hello">' + face(U().name, 'av-md') + '<div class="hello-t"><p class="small">' + sub + '</p><h1 class="pg-title">' + title + '</h1></div>' + (extra || '') + '</div>'; }
+  function hello(sub, title, extra) { return '<div class="hello">' + face(U().name, 'av-md', U().photo) + '<div class="hello-t"><p class="small">' + sub + '</p><h1 class="pg-title">' + title + '</h1></div>' + (extra || '') + '</div>'; }
   function stat(href, n, label) { return '<a class="stat" href="' + href + '"><b>' + n + '</b><span>' + label + '</span></a>'; }
   function stChip(text, cls) { return '<span class="st ' + cls + '">' + text + '</span>'; }
   function jcard(j) {
@@ -338,8 +353,8 @@
         : j.applied ? '<button type="button" class="btn btn-primary" disabled>' + ic('tick') + 'Proposal sent</button>'
         : '<button type="button" class="btn btn-primary" data-act="apply">Apply now</button>';
       var fee = j.fre_fee_pct ? Math.round(j.budget * j.fre_fee_pct / 100) : 0;
-      return '<div class="wrap d-wrap"><div class="d-top">' + backBtn() + '</div><div class="d-layout"><div class="d-content">' +
-        '<p class="jr-time">Posted ' + ago(j.created_at) + ' · ' + esc(CAT[j.cat] ? CAT[j.cat].label : '') + '</p>' +
+      return '<div class="wrap d-wrap"><div class="d-top">' + backBtn() + (j.status === 'removed' ? '' : shareBtn(jobUrl(j), j.title)) + '</div><div class="d-layout"><div class="d-content">' +
+        '<p class="jr-time">Posted ' + ago(j.created_at) + (j.edited_at ? ' · Edited' : '') + ' · ' + esc(CAT[j.cat] ? CAT[j.cat].label : '') + '</p>' +
         '<h1 class="d-title">' + esc(j.title) + '</h1>' +
         (open ? '<p class="fund-line">' + ic('shield') + 'Paid through escrow. The client deposits the agreed price when they hire, before work starts.</p>' : '<p class="nofund-line">' + ic('clock') + 'This job is no longer taking proposals.</p>') +
         '<section class="d-block"><p class="d-desc">' + esc(j.descr) + '</p></section>' +
@@ -354,7 +369,7 @@
         (mine && j.client_fee_pct != null ? '<section class="d-block"><h2 class="sub">What you’ll pay at this budget</h2><dl class="kv">' + kv('Freelancer’s price', naira(j.budget)) + kv('PadiHire service fee (' + j.client_fee_pct + '%)', naira(Math.round(j.budget * j.client_fee_pct / 100))) + kv('Total to deposit when you hire', naira(j.budget + Math.round(j.budget * j.client_fee_pct / 100)), true) + '</dl>' +
           '<p class="small">The freelancer’s price is held in escrow until you approve the work.</p></section>' : '') +
         '<section class="d-block"><h2 class="sub">Activity on this job</h2><dl class="kv">' + kv('Proposals', band(j.props)) + kv('Interviewing', j.interviewing) + kv('Posted', ago(j.created_at)) + '</dl></section>' +
-        '<section class="d-block"><h2 class="sub">About the client</h2><div class="cb-head">' + face(cl.name, 'av-md') + '<div><p class="cb-name">' + esc(cl.name) + '</p>' + (cl.person !== cl.name ? '<p class="small">' + esc(cl.person) + '</p>' : '') + '</div></div>' +
+        '<section class="d-block"><h2 class="sub">About the client</h2><div class="cb-head">' + face(cl.name, 'av-md', cl.photo) + '<div><p class="cb-name">' + esc(cl.name) + '</p>' + (cl.person !== cl.name ? '<p class="small">' + esc(cl.person) + '</p>' : '') + '</div></div>' +
         '<ul class="cb-list">' + (cl.verified ? '<li class="ok-t">' + ic('shield') + 'Payment verified · has deposited money on PadiHire</li>' : '<li>' + ic('shield') + 'Payment not verified yet</li>') +
         (cl.city ? '<li>' + ic('pin') + esc(cl.city) + '</li>' : '') + '<li>' + ic('briefcase') + cl.posted + (cl.posted === 1 ? ' job' : ' jobs') + ' posted · ' + cl.hires + (cl.hires === 1 ? ' hire' : ' hires') + '</li><li>' + ic('user') + 'Member since ' + new Date(cl.since * 1000).getFullYear() + '</li></ul></section>' +
         (mine ? '' : '<p class="d-report"><button type="button" data-act="report">' + ic('flag') + 'Report this job</button></p>') +
@@ -383,9 +398,9 @@
       var act = me ? '<a class="btn btn-ghost" href="#/edit-profile">Edit profile</a>'
         : role() === 'cli' ? '<button type="button" class="btn btn-primary" data-act="invite" data-id="' + p.id + '">Invite to a job</button>'
         : !U() ? '<button type="button" class="btn btn-primary" data-act="join" data-v="cli">Hire ' + esc(first(p.name)) + '</button>' : '';
-      return '<div class="wrap scr col">' + backBtn() + '<div class="p-head">' + face(p.name, 'av-lg') + '<div style="min-width:0"><h1 class="pg-title">' + esc(p.name) + '</h1><p class="fr-title">' + esc(p.title || CAT[p.cat].label) + '</p>' +
+      return '<div class="wrap scr col">' + backBtn() + '<div class="p-head">' + face(p.name, 'av-lg', p.photo) + '<div style="min-width:0"><h1 class="pg-title">' + esc(p.name) + '</h1><p class="fr-title">' + esc(p.title || CAT[p.cat].label) + '</p>' +
         '<p class="fr-meta">' + (p.city ? '<span>' + ic('pin') + esc(p.city) + '</span>' : '') + stars(p.rating, p.reviews) + '<span>' + p.jobs_done + (p.jobs_done === 1 ? ' job done' : ' jobs done') + '</span></p></div></div>' +
-        (act ? '<div class="pf-act">' + act + '</div>' : '') +
+        '<div class="pf-act">' + act + shareBtn(proUrl(p), p.name + ' on PadiHire', me ? 'Share my profile' : 'Share') + '</div>' +
         '<section class="d-block"><h2 class="sub">About</h2><p class="d-desc">' + esc(p.about || 'No bio yet.') + '</p>' + (p.skills.length ? '<ul class="chips" style="margin-top:12px">' + p.skills.map(li).join('') + '</ul>' : '') + '</section>' +
         ((d.portfolio || []).length ? '<section class="d-block"><h2 class="sub">Portfolio</h2><div class="port-grid">' + portGrid(d.portfolio, false) + '</div></section>' : '') +
         '<section class="d-block"><dl class="kv">' + kv('Category', esc(CAT[p.cat].label)) + (p.rate_from ? kv('Jobs from', naira(p.rate_from)) : '') + kv('Member since', new Date(p.since * 1000).getFullYear()) +
@@ -509,7 +524,7 @@
     var u = U(), w = S.me.wallet || {};
     var act = p.proposals.filter(function (x) { return x.status === 'sent'; }).length;
     return '<aside class="side" aria-label="Your account">' +
-      sideBox('', '<div class="sb-me">' + face(u.name, 'av-md') + '<div style="min-width:0"><p class="cb-name">' + esc(u.name) + '</p><p class="small">' + esc(u.title || (CAT[u.cat] ? CAT[u.cat].label : 'Freelancer')) + '</p></div></div>', '<a class="link-btn" href="#/freelancer/' + u.id + '">View public profile</a>') +
+      sideBox('', '<div class="sb-me">' + face(u.name, 'av-md', u.photo) + '<div style="min-width:0"><p class="cb-name">' + esc(u.name) + '</p><p class="small">' + esc(u.title || (CAT[u.cat] ? CAT[u.cat].label : 'Freelancer')) + '</p></div></div>', '<a class="link-btn" href="#/freelancer/' + u.id + '">View public profile</a>') +
       sideBox('Wallet', '<dl class="kv">' + kv('Available', naira(w.avail)) + kv('In escrow', naira(w.escrow_in)) + '</dl>', '<a class="link-btn" href="#/wallet">Go to wallet</a>') +
       sideBox('Your work', '<dl class="kv">' + kv('Active proposals', act) + kv('Proposals left this month', p.left + ' of ' + p.monthly) + kv('Active contracts', S.me.active || 0) + '</dl>', '<a class="link-btn" href="#/proposals">See proposals</a>') +
       '</aside>';
@@ -541,7 +556,7 @@
           var line = k.stage === 'active' ? '<span class="fund">' + ic('shield') + naira(k.amount) + ' in escrow</span><span>Due ' + dateText(k.due_at) + '</span>'
             : k.stage === 'delivered' ? '<span>Delivered, waiting for approval</span>' : k.stage === 'disputed' ? '<span class="act-t">In dispute. PadiHire is reviewing</span>'
             : k.stage === 'paid' ? '<span class="ok-t">' + ic('tick') + naira(k.net) + ' paid to you</span>' : '<span>Refunded to the client</span>';
-          return '<article class="jrow"><h3 class="jr-title"><a class="jr-link" href="#/chat/' + k.thread_id + '">' + esc(k.title) + '</a></h3><p class="who-line">' + face(k.client, 'av-sm') + esc(k.client) + '</p><p class="jr-client">' + line + '</p></article>';
+          return '<article class="jrow"><h3 class="jr-title"><a class="jr-link" href="#/chat/' + k.thread_id + '">' + esc(k.title) + '</a></h3><p class="who-line">' + face(k.client, 'av-sm', k.client_photo) + esc(k.client) + '</p><p class="jr-client">' + line + '</p></article>';
         }).join('') + '</div>' : emptyBox(S.ktab === 'active' ? 'No active contracts' : 'No completed contracts', 'When a client hires you, the job and its escrow payment show here.')) + '</div>';
     }
   };
@@ -581,7 +596,7 @@
     var line = j.stage === 'paid' ? '<span class="ok-t">' + ic('tick') + 'Paid ' + naira(j.amount) + '</span>' + (j.rated ? '' : '<span class="go-t">Leave a review' + ic('next') + '</span>')
       : j.stage === 'refunded' ? '<span>Refunded to your wallet</span>' : j.stage === 'delivered' ? '<span class="act-t">Delivered. Review and approve</span>'
       : j.stage === 'disputed' ? '<span class="act-t">In dispute. PadiHire is reviewing</span>' : '<span class="fund">' + ic('shield') + naira(j.amount) + ' in escrow</span>';
-    return '<article class="jrow"><h3 class="jr-title"><a class="jr-link" href="#/chat/' + j.thread_id + '">' + esc(j.title) + '</a></h3><p class="who-line">' + face(j.fre_name, 'av-sm') + esc(j.fre_name) + '</p><p class="jr-client">' + line + '</p></article>';
+    return '<article class="jrow"><h3 class="jr-title"><a class="jr-link" href="#/chat/' + j.thread_id + '">' + esc(j.title) + '</a></h3><p class="who-line">' + face(j.fre_name, 'av-sm', j.fre_photo) + esc(j.fre_name) + '</p><p class="jr-client">' + line + '</p></article>';
   }
   function cliSide(w) {
     return '<aside class="side" aria-label="Your account">' +
@@ -596,6 +611,7 @@
       var j = d.job, open = j.status === 'open', pct = d.client_fee_pct;
       var s = '<div class="wrap scr col"><a class="back" href="#/dash">' + ic('back') + 'My jobs</a><h1 class="pg-title">' + esc(j.title) + '</h1>' +
         '<p class="jr-terms" style="margin-top:6px">Fixed price · Budget: <b>' + naira(j.budget) + '</b> · ' + daysText(j.days) + ' · ' + (open ? 'Open' : j.status === 'hired' ? 'Hired' : 'Closed') + '</p>' +
+        (open ? '<p class="pf-act" style="margin-top:12px"><a class="btn btn-ghost btn-sm" href="#/edit-job/' + j.id + '">' + ic('pen') + 'Edit job</a>' + shareBtn(jobUrl(j), j.title) + '</p>' : '') +
         (open ? '<p class="small" style="margin-top:4px">You pay nothing until you hire. Then you deposit the freelancer’s price plus a ' + pct + '% service fee, and the price is held in escrow until you approve the work.</p>' : '') +
         (j.thread_id ? '<p style="margin-top:10px"><a class="btn btn-primary btn-sm" href="#/chat/' + j.thread_id + '">Go to contract</a></p>' : '');
       s += utabs('mtab', [['props', 'Proposals (' + d.proposals.length + ')'], ['post', 'Job post']], S.mtab);
@@ -605,7 +621,7 @@
       } else {
         s += d.proposals.length ? '<div class="rows">' + d.proposals.map(function (p) {
           var hired = p.status === 'hired';
-          return '<article class="prop' + (hired ? ' hired' : '') + '"><div class="prop-head">' + face(p.name, 'av-md') +
+          return '<article class="prop' + (hired ? ' hired' : '') + '"><div class="prop-head">' + face(p.name, 'av-md', p.photo) +
             '<div style="min-width:0"><p class="fr-name"><a class="name-link" href="#/freelancer/' + p.fre_id + '">' + esc(p.name) + '</a></p><p class="fr-title">' + esc(p.title) + '</p><p class="fr-meta">' + (p.city ? '<span>' + ic('pin') + esc(p.city) + '</span>' : '') + stars(p.rating, p.reviews) + '</p></div>' +
             '<p class="fr-rate"><b>' + naira(p.price) + '</b><span>' + daysText(p.days) + '</span></p></div>' +
             '<p class="prop-note">' + esc(p.note) + '</p>' + filesBlock(p.files) +
@@ -616,19 +632,33 @@
       return s + '</div>';
     }
   };
-  V.post = {
-    need: 'cli', title: function () { return 'Post a job'; },
-    html: function () {
-      var pct = feePct().client_fee_pct || 0;
-      return '<div class="wrap scr narrow"><h1 class="pg-title">Post a job</h1><p class="pg-sub">Posting is free. Freelancers send proposals with their price. When you hire, you deposit that price plus a ' + pct + '% service fee, and PadiHire holds the price in escrow until you approve the work.</p>' +
-        '<form id="f-post" class="form" novalidate>' +
-        field('pj-title', 'Job title', '<input id="pj-title" type="text" placeholder="e.g. Design a logo for my bakery" autocomplete="off" maxlength="120">') +
-        '<div class="field-row">' + field('pj-cat', 'Category', '<select id="pj-cat">' + catOptions('Choose a category') + '</select>') + field('pj-level', 'Experience needed', '<select id="pj-level">' + LEVELS.map(function (l) { return '<option' + (l === 'Intermediate' ? ' selected' : '') + '>' + l + '</option>'; }).join('') + '</select>') + '</div>' +
-        '<div class="field-row">' + field('pj-budget', 'Budget (₦)', '<input id="pj-budget" type="text" inputmode="numeric" placeholder="25,000">', 'Fixed price for the whole job') + field('pj-days', 'Delivery (days)', '<input id="pj-days" type="text" inputmode="numeric" placeholder="3">') + '</div>' +
-        field('pj-city', 'Location', '<select id="pj-city"><option value="Remote">Remote (anywhere in Nigeria)</option>' + cityOptions() + '</select>') +
-        '<div class="field"><span class="flabel">Skills needed (up to 5)</span>' + skillPicker('pj', 5, [], '') + '</div>' +
-        field('pj-descr', 'Describe the job', '<textarea id="pj-descr" rows="6" maxlength="4000" placeholder="What do you need, what will you send the freelancer, and what should they deliver?"></textarea>') +
-        '<button type="submit" class="btn btn-primary full">Post job</button></form></div>';
+  function postForm(j) {
+    var pct = feePct().client_fee_pct || 0, ed = !!j, lvl;
+    j = j || {}; lvl = j.level || 'Intermediate';
+    return '<div class="wrap scr narrow">' + (ed ? '<a class="back" href="#/myjob/' + j.id + '">' + ic('back') + 'Back to job</a>' : '') + '<h1 class="pg-title">' + (ed ? 'Edit job' : 'Post a job') + '</h1>' +
+      '<p class="pg-sub">' + (ed ? 'Your changes show straight away. Proposals you already have stay as they are.' : 'Posting is free. Freelancers send proposals with their price. When you hire, you deposit that price plus a ' + pct + '% service fee, and PadiHire holds the price in escrow until you approve the work.') + '</p>' +
+      '<form id="f-post" class="form" novalidate' + (ed ? ' data-edit="' + j.id + '"' : '') + '>' +
+      field('pj-title', 'Job title', '<input id="pj-title" type="text" placeholder="e.g. Design a logo for my bakery" autocomplete="off" maxlength="120" value="' + esc(j.title || '') + '">') +
+      '<div class="field-row">' + field('pj-cat', 'Category', '<select id="pj-cat">' + catOptions('Choose a category') + '</select>') + field('pj-level', 'Experience needed', '<select id="pj-level">' + LEVELS.map(function (l) { return '<option' + (l === lvl ? ' selected' : '') + '>' + l + '</option>'; }).join('') + '</select>') + '</div>' +
+      '<div class="field-row">' + field('pj-budget', 'Budget (₦)', '<input id="pj-budget" type="text" inputmode="numeric" placeholder="25,000" value="' + (j.budget ? num(j.budget) : '') + '">', 'Fixed price for the whole job') + field('pj-days', 'Delivery (days)', '<input id="pj-days" type="text" inputmode="numeric" placeholder="3" value="' + (j.days || '') + '">') + '</div>' +
+      field('pj-city', 'Location', '<select id="pj-city"><option value="Remote">Remote (anywhere in Nigeria)</option>' + cityOptions() + '</select>') +
+      '<div class="field"><span class="flabel">Skills needed (up to 5)</span>' + skillPicker('pj', 5, j.skills || [], j.cat || '') + '</div>' +
+      field('pj-descr', 'Describe the job', '<textarea id="pj-descr" rows="6" maxlength="4000" placeholder="What do you need, what will you send the freelancer, and what should they deliver?">' + esc(j.descr || '') + '</textarea>') +
+      '<button type="submit" class="btn btn-primary full">' + (ed ? 'Save changes' : 'Post job') + '</button></form></div>';
+  }
+  V.post = { need: 'cli', title: function () { return 'Post a job'; }, html: function () { return postForm(null); } };
+  V['edit-job'] = {
+    need: 'cli', title: function () { return 'Edit job'; },
+    load: function (id) { return api('GET', 'myjobs/' + encodeURIComponent(id)); },
+    html: function (d) {
+      var j = d.job;
+      if (j.status !== 'open') return '<div class="wrap scr col">' + emptyBox('This job can’t be edited', 'You can only edit a job while it’s open. ' + (j.status === 'hired' ? 'You’ve already hired someone for it.' : 'This one is closed.'), '<a class="btn btn-ghost" href="#/myjob/' + j.id + '">Back to job</a>') + '</div>';
+      return postForm(j);
+    },
+    after: function (d) {
+      var j = d.job, c = $('#pj-cat'), w = $('#pj-city');
+      if (c) c.value = j.cat || '';
+      if (w) { w.value = j.remote ? 'Remote' : (j.city || 'Remote'); if (!w.value) w.value = 'Remote'; }
     }
   };
 
@@ -641,7 +671,7 @@
       return '<div class="wrap scr col"><h1 class="pg-title">Messages</h1>' +
         (S.me.unread_other ? '<p class="small" style="margin-top:6px">You have ' + S.me.unread_other + ' unread as a ' + (cliR ? 'freelancer' : 'client') + '. <button type="button" class="link-btn" data-act="switch" data-v="' + (cliR ? 'fre' : 'cli') + '">Switch to see them</button></p>' : '') +
         (d.threads.length ? '<div class="rows" style="margin-top:14px">' + d.threads.map(function (t) {
-          return '<a class="mrow' + (t.unread ? ' unread' : '') + '" href="#/chat/' + t.id + '">' + face(t.other) + '<span class="m-main"><span class="m-name">' + esc(t.other) + '</span><span class="m-job">' + esc(t.job) + '</span><span class="m-last">' + (t.mine ? 'You: ' : '') + esc(t.last_text || 'No messages yet') + '</span></span>' +
+          return '<a class="mrow' + (t.unread ? ' unread' : '') + '" href="#/chat/' + t.id + '">' + face(t.other, '', t.other_photo) + '<span class="m-main"><span class="m-name">' + esc(t.other) + '</span><span class="m-job">' + esc(t.job) + '</span><span class="m-last">' + (t.mine ? 'You: ' : '') + esc(t.last_text || 'No messages yet') + '</span></span>' +
             '<span class="m-right"><span>' + (t.last_at ? ago(t.last_at).replace(' ago', '') : '') + '</span>' + (t.unread ? '<span class="dot" aria-label="Unread"></span>' : '') + '</span></a>';
         }).join('') + '</div>' : emptyBox('No messages yet', cliR ? 'Message a freelancer from their proposal, or invite someone to your job.' : 'When a client messages you about a proposal, you can chat here.')) + '</div>';
     }
@@ -666,6 +696,7 @@
       else acts = '<p class="small">' + naira(k.amount - k.fre_fee) + ' was added to your wallet (' + naira(k.amount) + ' minus the ' + k.fre_fee_pct + '% PadiHire fee).</p>';
     }
     var label = { active: 'Held', delivered: 'Held', disputed: 'Frozen', paid: 'Released', refunded: 'Refunded' }[st];
+    acts += '<a class="link-btn rc-link" href="#/receipt/contract-' + k.id + '">' + ic('receipt') + 'View receipt</a>';
     return '<section class="cpanel"><dl class="cp-rows"><div><dt>Fixed price</dt><dd>' + naira(k.amount) + '</dd></div><div><dt>Escrow</dt><dd class="' + (st === 'active' || st === 'delivered' ? 'fund' : '') + '">' + label + '</dd></div><div><dt>Due</dt><dd>' + dateText(k.due_at) + '</dd></div></dl>' + timeline(items) + '<div class="cp-act">' + acts + '</div></section>';
   }
   function bubble(m) {
@@ -679,7 +710,7 @@
     html: function (d) {
       var t = d.thread, cliR = t.side === 'client', who = cliR ? t.fre : t.client, name = cliR ? t.fre.name : t.client.name;
       return '<div class="wrap scr col"><button type="button" class="back" data-act="back">' + ic('back') + 'Back</button>' +
-        '<div class="th-head">' + face(name) + '<div style="min-width:0"><p class="th-name">' + (cliR ? '<a class="name-link" href="#/freelancer/' + who.id + '">' + esc(name) + '</a>' : esc(name)) + '</p><p class="small"><a class="link-btn" href="#/' + (cliR ? 'myjob/' : 'job/') + t.job_id + '">' + esc(t.job) + '</a></p></div></div>' +
+        '<div class="th-head">' + face(name, '', who.photo) + '<div style="min-width:0"><p class="th-name">' + (cliR ? '<a class="name-link" href="#/freelancer/' + who.id + '">' + esc(name) + '</a>' : esc(name)) + '</p><p class="small"><a class="link-btn" href="#/' + (cliR ? 'myjob/' : 'job/') + t.job_id + '">' + esc(t.job) + '</a></p></div></div>' +
         '<div id="cpanel">' + (t.contract ? contractPanel(t) : '<p class="notice-line">' + ic('shield') + 'Keep chats and payments on PadiHire. Phone numbers, emails, WhatsApp and Telegram details are hidden automatically.</p>') + '</div>' +
         (t.contract ? '<h2 class="sub" style="margin-top:22px">Messages</h2>' : '') +
         '<div class="bubbles" id="bubbles">' + (d.messages.length ? d.messages.map(bubble).join('') : '<p class="small" id="no-msgs">Say hello and ask anything about the job.</p>') + '</div>' +
@@ -733,9 +764,50 @@
       if (wds.length) s += '<p class="small" style="margin-top:14px">' + wds.map(function (w) { return 'Withdrawal of ' + naira(w.amount) + ' is being processed.'; }).join(' ') + '</p>';
       s += secHead('Transactions') + (d.ledger.length ? '<ul class="tx">' + d.ledger.map(function (a) {
         var amt = a.kind === 'release' ? '<b class="rel">' + naira(a.info) + '<small>from escrow</small></b>' : '<b class="' + (a.amount > 0 ? 'pos' : '') + '">' + (a.amount > 0 ? '+' : '−') + naira(Math.abs(a.amount)).replace('−', '') + '</b>';
-        return '<li><span class="tx-d">' + dateText(a.created_at) + '</span><span class="tx-l">' + esc(a.label) + '</span>' + amt + '</li>';
+        return '<li><span class="tx-d">' + dateText(a.created_at) + '</span><span class="tx-l">' + esc(a.label) + (a.receipt ? '<a class="tx-rc" href="#/receipt/' + a.receipt + '">' + ic('receipt') + 'Receipt</a>' : '') + '</span>' + amt + '</li>';
       }).join('') + '</ul>' : emptyBox('No transactions yet', cliR ? 'Top-ups, escrow deposits and refunds show here.' : 'Payments from clients and withdrawals show here.'));
       return s + '</div>';
+    }
+  };
+  function receiptBody(r) {
+    var rows = '', money = '', status = '', tone = '', head = '';
+    if (r.kind === 'contract') {
+      var cl = r.side === 'client', refunded = r.stage === 'refunded';
+      head = 'Contract receipt';
+      status = cl ? { active: 'Paid into escrow', delivered: 'Paid into escrow', disputed: 'In dispute', paid: 'Completed', refunded: 'Refunded to you' }[r.stage]
+        : { active: 'Held in escrow', delivered: 'Held in escrow', disputed: 'In dispute', paid: 'Paid to you', refunded: 'Refunded to the client' }[r.stage];
+      tone = r.stage === 'paid' ? 'ok' : (refunded || r.stage === 'disputed') ? 'warn' : '';
+      rows = kv('Job', esc(r.title)) + kv('Client', esc(r.client)) + kv('Freelancer', esc(r.freelancer)) + kv('Hired on', fullDate(r.date)) + kv('Delivery time', daysText(r.days)) +
+        (r.closed_at ? kv(refunded ? 'Refunded on' : 'Paid on', fullDate(r.closed_at)) : '');
+      money = cl ? kv('Freelancer’s price', naira(r.amount)) + kv('PadiHire service fee', naira(r.fee)) + kv('Total paid', naira(r.total), true) +
+          (refunded ? kv('Refunded to your wallet', naira(r.amount + (r.fee_refunded ? r.fee : 0))) : '')
+        : kv('Contract price', naira(r.amount)) + kv('PadiHire fee (' + r.fee_pct + '%)', '−' + naira(r.fee)) + (refunded ? kv('Paid to you', naira(0), true) : kv(r.stage === 'paid' ? 'You received' : 'You receive when approved', naira(r.net), true));
+    } else if (r.kind === 'topup') {
+      head = 'Wallet top-up receipt';
+      status = { pending: 'Being checked', confirmed: 'Confirmed', rejected: 'Not confirmed' }[r.status] || r.status;
+      tone = r.status === 'confirmed' ? 'ok' : r.status === 'rejected' ? 'warn' : '';
+      rows = kv('Account', esc(r.name)) + kv('Method', 'Bank transfer') + kv('Transfer reference', esc(r.ref)) + kv('Requested on', fullDate(r.date)) +
+        (r.decided_at ? kv(r.status === 'confirmed' ? 'Confirmed on' : 'Checked on', fullDate(r.decided_at)) : '') + (r.status === 'rejected' && r.note ? kv('Reason', esc(r.note)) : '');
+      money = kv(r.status === 'confirmed' ? 'Added to wallet' : 'Amount', naira(r.amount), true);
+    } else {
+      head = 'Withdrawal receipt';
+      status = { pending: 'Processing', paid: 'Paid', rejected: 'Not paid' }[r.status] || r.status;
+      tone = r.status === 'paid' ? 'ok' : r.status === 'rejected' ? 'warn' : '';
+      rows = kv('Account', esc(r.name)) + kv('Paid to', esc(r.bank) + ' ' + esc(r.acct)) + kv('Account name', esc(r.holder)) + kv('Requested on', fullDate(r.date)) +
+        (r.decided_at ? kv(r.status === 'paid' ? 'Paid on' : 'Checked on', fullDate(r.decided_at)) : '') + (r.status === 'rejected' ? kv('What happened', esc(r.note || 'Not paid') + '. The money went back to your wallet.') : '');
+      money = kv('Amount', naira(r.amount), true);
+    }
+    return '<article class="rcpt" aria-label="' + head + '"><header class="rc-head">' + brandHtml('#/', 'PadiHire home') + '<div class="rc-no"><p class="rc-kind">' + head + '</p><p class="rc-num">' + esc(r.number) + '</p></div></header>' +
+      '<p class="rc-status' + (tone ? ' ' + tone : '') + '">' + esc(status) + '</p>' +
+      '<dl class="kv rc-rows">' + rows + '</dl><dl class="kv box rc-money">' + money + '</dl>' +
+      '<p class="rc-foot">PadiHire · Freelance work and talent in Nigeria' + (S.me.support_whatsapp ? ' · Support on WhatsApp: ' + esc(S.me.support_whatsapp) : '') + '<br>Printed ' + fullDate(Math.floor(Date.now() / 1000)) + '</p></article>';
+  }
+  V.receipt = {
+    need: 'any', title: function (d) { return 'Receipt ' + d.receipt.number; },
+    load: function (arg) { var m = /^(contract|topup|withdrawal)-(\d+)$/.exec(arg || ''); return m ? api('GET', 'receipts/' + m[1] + '/' + m[2]) : Promise.reject({ status: 404, message: 'Receipt not found.' }); },
+    html: function (d) {
+      return '<div class="wrap scr narrow"><div class="rc-top no-print">' + backBtn() + '<button type="button" class="btn btn-primary btn-sm" data-act="print">' + ic('down') + 'Save as PDF</button></div>' + receiptBody(d.receipt) +
+        '<p class="small no-print rc-tip">Tap “Save as PDF”, then choose “Save as PDF” as the printer. On iPhone, tap Share in the print screen to save it to Files.</p></div>';
     }
   };
   function mitem(icon, title, sub, attrs) { return '<li><' + (attrs.indexOf('href=') === 0 ? 'a ' : 'button type="button" ') + attrs + '>' + ic(icon) + '<span><strong>' + title + '</strong>' + (sub ? '<small>' + sub + '</small>' : '') + '</span>' + ic('next') + '</' + (attrs.indexOf('href=') === 0 ? 'a' : 'button') + '></li>'; }
@@ -744,10 +816,10 @@
     html: function () {
       var u = U(), cliR = role() === 'cli', w = S.me.wallet || {};
       var line = cliR ? (u.business || 'Client') + (u.city ? ' · ' + u.city : '') : (u.title || 'Freelancer') + (u.city ? ' · ' + u.city : '');
-      return '<div class="wrap scr col"><div class="p-head">' + face(u.name, 'av-lg') + '<div style="min-width:0"><h1 class="pg-title">' + esc(u.name) + '</h1><p class="small">' + esc(line) + '</p>' + (!cliR && u.reviews ? '<p class="stars">' + ic('star', 'is') + '<b>' + u.rating.toFixed(1) + '</b> · ' + u.jobs_done + ' jobs done</p>' : '') + '</div></div>' +
+      return '<div class="wrap scr col"><div class="p-head">' + face(u.name, 'av-lg', u.photo) + '<div style="min-width:0"><h1 class="pg-title">' + esc(u.name) + '</h1><p class="small">' + esc(line) + '</p>' + (!cliR && u.reviews ? '<p class="stars">' + ic('star', 'is') + '<b>' + u.rating.toFixed(1) + '</b> · ' + u.jobs_done + ' jobs done</p>' : '') + '</div></div>' +
         '<ul class="mlist">' + mitem('wallet', 'Wallet', naira(w.avail) + ' available', 'href="#/wallet"') +
         mitem('pen', 'Edit profile', cliR ? 'Name, business, city, password' : 'Headline, bio, skills, price, password', 'href="#/edit-profile"') +
-        (cliR ? mitem('plus', 'Post a job', '', 'href="#/post"') : mitem('eye', 'View public profile', '', 'href="#/freelancer/' + u.id + '"') + mitem('heart', 'Saved jobs', '', 'href="#/work" data-saved="1"')) +
+        (cliR ? mitem('plus', 'Post a job', '', 'href="#/post"') : mitem('eye', 'View public profile', '', 'href="#/freelancer/' + u.id + '"') + (u.username ? mitem('share', 'Share your profile', esc(location.host + '/u/' + u.username), 'data-act="share" data-url="' + esc(proUrl(u)) + '" data-title="' + esc(u.name + ' on PadiHire') + '"') : '') + mitem('heart', 'Saved jobs', '', 'href="#/work" data-saved="1"')) +
         mitem('bank', 'Bank account', u.bank.acct ? esc(u.bank.name) + ' •••• ' + esc(u.bank.acct.slice(-4)) : 'Not added yet', 'data-act="bank"') +
         mitem(cliR ? 'laptop' : 'briefcase', cliR ? 'Switch to freelancing' : 'Switch to hiring', cliR ? 'Find work with the same account' : 'Post jobs with the same account', 'data-act="switch" data-v="' + (cliR ? 'fre' : 'cli') + '"') +
         (S.me.mail ? mitem('bell', 'Email alerts', u.email_alerts ? 'On for messages and proposals' : 'Off. Payment emails still come', 'data-act="alerts"') : '') +
@@ -762,6 +834,7 @@
       S.cv = undefined; S.cvfill = null;
       return '<div class="wrap scr narrow">' + (setup ? '<p class="step-note">Last step</p>' : backBtn()) + '<h1 class="pg-title">' + (setup ? (fre ? 'Set up your profile' : 'Finish your profile') : 'Edit profile') + '</h1>' +
         (setup ? '<p class="pg-sub">' + (fre ? 'Clients see this when you apply. Fill it in to start using PadiHire.' : 'Tell freelancers where you are. This takes a few seconds.') + '</p>' : '') +
+        (S.me.uploads ? photoRow(u) : '') +
         (fre && S.me.ai ? cvFillBox(setup) : '') +
         '<form id="f-profile" class="form" novalidate data-setup="' + (setup ? 1 : 0) + '">' +
         field('pf-name', 'Full name', '<input id="pf-name" type="text" value="' + esc(u.name) + '" autocomplete="name">') +
@@ -773,6 +846,7 @@
           '<div class="field"><span class="flabel">CV <span class="opt">(optional)</span></span>' + cvBlock() + '</div>' +
           field('pf-rate', 'Jobs from (₦) <span class="opt">(optional)</span>', '<input id="pf-rate" type="text" inputmode="numeric" value="' + (u.rate_from ? num(u.rate_from) : '') + '" placeholder="15,000">', 'Your usual starting price')
           : field('pf-business', 'Business or brand name <span class="opt">(optional)</span>', '<input id="pf-business" type="text" value="' + esc(u.business) + '">')) +
+        (fre && !setup ? field('pf-username', 'Your profile link', '<div class="ulink"><span class="ulink-pre" aria-hidden="true">' + esc(location.host) + '/u/</span><input id="pf-username" type="text" value="' + esc(u.username || '') + '" autocapitalize="off" autocomplete="off" spellcheck="false" maxlength="30"></div>', 'Share it on WhatsApp, Instagram or your CV. Letters, numbers and dashes.') : '') +
         field('pf-phone', 'Phone number <span class="opt">(optional)</span>', '<input id="pf-phone" type="tel" inputmode="tel" autocomplete="tel" value="' + esc(u.phone) + '" placeholder="0803 123 4567">', 'Only PadiHire sees it, for support and logging in. Never shown to anyone else.') +
         '<button type="submit" class="btn btn-primary full">' + (setup ? (fre ? 'Save and find work' : 'Save and continue') : 'Save profile') + '</button></form>' +
         (fre && !setup ? '<h2 class="sub" style="margin-top:34px">Portfolio</h2><p class="small">Show up to 8 pictures of your best work. Clients see them on your profile.</p><div id="pf-port" class="port-grid">' + portGrid(S.port, true) + '</div>' : '') +
@@ -781,6 +855,36 @@
         field('pw-current', 'Current password', '<input id="pw-current" type="password" autocomplete="current-password">') +
         field('pw-password', 'New password', '<input id="pw-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">') +
         '<button type="submit" class="btn btn-ghost full">Change password</button></form>') + '</div>';
+  }
+  function photoRow(u) {
+    return '<div class="ph-row" id="ph-row">' + face(u.name, 'av-xl', u.photo) + '<div class="ph-main"><p class="ph-t">Profile photo <span class="opt">(optional)</span></p><p class="hint" id="ph-hint">' + (role() === 'fre' ? 'A clear photo of your face helps clients trust you.' : 'Freelancers see it on your jobs and messages.') + '</p>' +
+      '<div class="ph-btns"><label class="btn btn-ghost btn-sm ph-pick">' + ic('camera') + (u.photo ? 'Change photo' : 'Add photo') + '<input type="file" id="up-photo" class="sr-only" accept="image/png,image/jpeg,image/webp"></label>' + (u.photo ? '<button type="button" class="link-btn" data-act="photo-del">Remove</button>' : '') + '</div><p class="err" id="ph-err" hidden></p></div></div>';
+  }
+  function squarePhoto(file) {
+    return new Promise(function (ok, no) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight, sz = Math.min(w, h), out = Math.min(400, sz), cv = document.createElement('canvas');
+        URL.revokeObjectURL(url);
+        if (!sz) return no(new Error('bad image'));
+        cv.width = cv.height = out;
+        var g = cv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.fillStyle = '#fff'; g.fillRect(0, 0, out, out);
+        g.drawImage(img, (w - sz) / 2, (h - sz) / 2, sz, sz, 0, 0, out, out);
+        cv.toBlob(function (b) { if (!b) return no(new Error('bad image')); try { ok(new File([b], 'photo.jpg', { type: 'image/jpeg' })); } catch (e) { b.name = 'photo.jpg'; ok(b); } }, 'image/jpeg', 0.86);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); no(new Error('bad image')); };
+      img.src = url;
+    });
+  }
+  function photoDone(msg, err) { var row = $('#ph-row'); if (row) row.outerHTML = photoRow(U()); if (err) fieldErr('ph', err); else toast(msg); }
+  function setPhoto(file) {
+    fieldErr('ph', '');
+    var hint = $('#ph-hint'); if (hint) hint.textContent = 'Uploading your photo…';
+    squarePhoto(file).then(null, function () { if (file.size > 5 * 1048576) throw new Error('That picture is too big. The limit is 5 MB.'); return file; })
+      .then(function (f2) { return upload(f2, 'avatar'); })
+      .then(function (r) { return api('POST', 'me/photo', { file_id: r.id }); })
+      .then(function () { return loadMe(); })
+      .then(function () { photoDone('Photo saved'); }, function (er) { photoDone('', er.message); });
   }
   function profileAfter() { var u = U(); var c = $('#pf-city'); if (c) c.value = u.city || ''; var k = $('#pf-cat'); if (k) k.value = u.cat || ''; }
   V['edit-profile'] = { need: 'any', title: function () { return 'Edit profile'; }, load: function () { return role() === 'fre' ? api('GET', 'me/portfolio').then(function (r) { S.port = r.items; }) : null; }, html: function () { return profileHtml(false); }, after: profileAfter };
@@ -960,7 +1064,8 @@
     if (v === 'job') return role() === 'fre' ? 'work' : role() === 'cli' ? 'dash' : 'jobs';
     if (v === 'chat') return 'messages';
     if (v === 'freelancer') return 'freelancers';
-    if (v === 'myjob') return 'dash';
+    if (v === 'myjob' || v === 'edit-job') return 'dash';
+    if (v === 'receipt') return role() === 'cli' ? 'dash' : 'home';
     if (v === 'contracts') return 'proposals';
     if (v === 'wallet') return role() === 'cli' ? 'dash' : 'home';
     if (v === 'join') return 'login';
@@ -971,7 +1076,7 @@
     var key = navKey(S.view), items = NAV[role() || 'visitor'], u = U();
     function badge(id) { var n = id === 'messages' ? S.me.unread : id === 'dash' ? S.me.waiting : 0; return n ? '<span class="count">' + n + '</span>' : ''; }
     var right = !u ? '<a class="login" href="#/login">Log in</a><button type="button" class="btn btn-primary btn-sm" data-act="join">Sign up</button>'
-      : '<a class="me-btn" href="#/account" aria-label="Your account"' + (S.view === 'account' ? ' aria-current="page"' : '') + '>' + face(u.name) + '</a>';
+      : '<a class="me-btn" href="#/account" aria-label="Your account"' + (S.view === 'account' ? ' aria-current="page"' : '') + '>' + face(u.name, '', u.photo) + '</a>';
     var navItems = u ? items.filter(function (it) { return it[0] !== 'login' && it[0] !== 'account'; }) : VNAV;
     $('#top').innerHTML = '<div class="wrap top-in">' + (u ? '' : '<button type="button" class="menu-btn" data-act="menu" aria-label="Open menu" aria-expanded="false" aria-controls="drawer">' + ic('menu') + '</button>') + brandHtml('#/', 'PadiHire home') +
       '<nav class="nav" aria-label="Main">' + navItems.map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
@@ -1109,6 +1214,15 @@
       case 'clear': S.q = blankQ(); go('jobs'); break;
       case 'pcat': S.pcat = v; location.hash = '#/freelancers?cat=' + v + (S.pq ? '&q=' + encodeURIComponent(S.pq) : ''); break;
       case 'menu': openDrawer(); break;
+      case 'share':
+        var shu = el.getAttribute('data-url'), sht = el.getAttribute('data-title') || 'PadiHire';
+        if (navigator.share) navigator.share({ title: sht, url: shu }).then(null, function (er) { if (!er || er.name !== 'AbortError') copyText(shu, 'Link copied. Paste it anywhere to share.'); });
+        else copyText(shu, 'Link copied. Paste it anywhere to share.');
+        break;
+      case 'print': window.print(); break;
+      case 'photo-del':
+        api('POST', 'me/photo', { file_id: 0 }).then(function () { return loadMe(); }).then(function () { photoDone('Photo removed'); }, function (er) { toast(er.message); });
+        break;
       case 'menu-close': closeDrawer(); break;
       case 'verify-resend':
         api('POST', 'me/verify').then(function (r) { if (r.already) { loadMe().then(function () { router(true); }); toast('Your email is already confirmed'); } else toast('Sent. Check your inbox and spam folder.'); }, function (er) { toast(er.message); });
@@ -1265,12 +1379,15 @@
         m.focus();
       }, function (er) { busy(btn, false); toast(er.message); });
     } else if (id === 'f-post') {
-      run(api('POST', 'jobs', { title: $('#pj-title').value, cat: $('#pj-cat').value, level: $('#pj-level').value, budget: parseNum($('#pj-budget').value), days: parseNum($('#pj-days').value) || 3, city: $('#pj-city').value, skills: S.picks.pj.list, descr: $('#pj-descr').value }),
+      var edId = f.getAttribute('data-edit'), pjBody = { title: $('#pj-title').value, cat: $('#pj-cat').value, level: $('#pj-level').value, budget: parseNum($('#pj-budget').value), days: parseNum($('#pj-days').value) || 3, city: $('#pj-city').value, skills: S.picks.pj.list, descr: $('#pj-descr').value };
+      if (edId) { run(api('POST', 'myjobs/' + edId + '/edit', pjBody), function (r) { S.mtab = 'post'; go('myjob/' + edId); toast(r.masked ? MASK_NOTE : 'Job updated'); }, 'pj-'); return; }
+      run(api('POST', 'jobs', pjBody),
         function (r) { S.mtab = 'props'; S.ctab = 'open'; loadMe(); go('myjob/' + r.id); toast(r.masked ? MASK_NOTE : 'Job posted. Freelancers can now send proposals.'); }, 'pj-');
     } else if (id === 'f-profile') {
       var fr = role() === 'fre';
       if (S.cv && S.cv.busy) { toast('Wait for your CV to finish uploading.'); return; }
       var body = { name: $('#pf-name').value, city: $('#pf-city').value, title: fr ? $('#pf-title').value : U().title, cat: fr ? $('#pf-cat').value : U().cat, skills: fr ? S.picks.pf.list : U().skills, about: fr ? $('#pf-about').value : U().about, rate_from: fr ? parseNum($('#pf-rate').value) : U().rate_from, business: fr ? U().business : $('#pf-business').value, phone: $('#pf-phone').value.trim() };
+      if ($('#pf-username')) body.username = $('#pf-username').value.trim().toLowerCase();
       if (fr && S.cv !== undefined) body.cv_file = S.cv ? S.cv.id : 0;
       run(api('POST', 'me/profile', body),
         function (r) { S.cv = undefined; loadMe().then(function () { var wasSetup = S.view === 'setup', n = S.next; S.next = ''; toast(r.masked ? MASK_NOTE : wasSetup ? 'You\u2019re all set' : 'Profile saved'); if (wasSetup && n && n !== '#/setup') location.hash = n; else go(wasSetup ? home() : fr ? 'work' : 'account'); }); }, 'pf-');
@@ -1300,6 +1417,7 @@
     var el = e.target;
     if (el.matches && el.matches('input[type=file][data-up]')) { handleFiles(el); return; }
     if (el.id === 'up-cvfill' && el.files && el.files[0]) { readCv(el.files[0]); return; }
+    if (el.id === 'up-photo' && el.files && el.files[0]) { setPhoto(el.files[0]); return; }
     if (el.id === 'up-port' && el.files && el.files[0]) {
       var file = el.files[0], pick = $('#pt-pick');
       if (file.size > 5 * 1048576) { fieldErr('pt-file', 'That picture is too big. The limit is 5 MB.'); return; }
@@ -1329,6 +1447,7 @@
   });
 
   /* ---------- boot ---------- */
+  if (window.__ROUTE && !location.hash) history.replaceState(null, '', '/#/' + window.__ROUTE);
   setupModal();
   footer();
   api('GET', 'me').then(function (m) { S.me = m; }, function () { S.me = { user: null }; }).then(function () {

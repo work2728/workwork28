@@ -731,3 +731,55 @@ body.hero-top .menu-btn:hover{background:rgba(255,255,255,.12)}
 .pp-contact .btn{border-radius:12px;font-weight:700}
 body[data-current="how"],body[data-current="pricing"],body[data-current="about"],body[data-current="help"]{background:var(--surface)}
 .drawer .dr-top .brand{color:var(--ink)}.drawer .dr-top .brand b{color:var(--accent)}.drawer .dr-top .lm-a{fill:var(--accent)}.drawer .dr-top .lm-b{fill:var(--mark-2)}
+
+/* ---------- profile photos ---------- */
+.av-xl{width:84px;height:84px;font-size:28px}
+img.av{display:block;object-fit:cover;background:var(--chip)}
+.ph-row{display:flex;align-items:center;gap:16px;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.ph-main{min-width:0;display:grid;gap:3px}
+.ph-t{font-weight:700;font-size:15px}
+.ph-btns{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:6px}
+.ph-pick{cursor:pointer;position:relative}
+.ph-pick:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.ph-row .err{margin:2px 0 0}
+
+/* ---------- share + profile link ---------- */
+.d-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.d-top .back{margin:0}
+.ulink{display:flex;align-items:stretch;min-width:0;border:1px solid var(--line-2);border-radius:8px;background:var(--field);overflow:hidden}
+.ulink:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+.ulink-pre{display:flex;align-items:center;padding:0 2px 0 12px;color:var(--muted);font-size:15px;white-space:nowrap;max-width:55%;overflow:hidden;text-overflow:ellipsis}
+.ulink input[type=text]{border:0;border-radius:0;padding-left:2px;min-width:0;outline:none}
+
+/* ---------- receipts ---------- */
+.rc-link{display:inline-flex;align-items:center;gap:6px;font-size:14px}
+.rc-link .ic{width:17px;height:17px}
+.tx-rc{display:inline-flex;align-items:center;gap:4px;margin-top:3px;font-size:12.5px;font-weight:600;color:var(--accent-ink);text-decoration:underline;text-underline-offset:2px;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent)}
+.tx-l .tx-rc{display:flex;width:max-content}
+.tx-rc .ic{width:14px;height:14px}
+.rc-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.rc-top .back{margin:0}
+.rcpt{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 18px 18px}
+.rc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.rc-head .brand{font-size:19px}
+.rc-no{text-align:right;min-width:0}
+.rc-kind{font-size:13px;color:var(--muted);font-weight:600}
+.rc-num{font-family:var(--display);font-weight:800;font-size:17px;letter-spacing:.01em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rc-status{display:inline-block;margin-top:14px;padding:4px 11px;border-radius:999px;font-size:13px;font-weight:700;background:var(--chip);color:var(--ink-2)}
+.rc-status.ok{background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}
+.rc-status.warn{background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
+.rc-rows{margin-top:10px}
+.rc-rows dd{max-width:62%;text-align:right;overflow-wrap:anywhere}
+.rc-money{margin-top:12px}
+.rc-foot{margin-top:16px;font-size:12.5px;color:var(--muted);line-height:1.55}
+.rc-tip{margin-top:12px}
+@page{margin:14mm}
+@media print{
+  .top,#tabs,.tabs,#foot,.no-print,.toast,.modal,.drawer,.vbanner{display:none !important}
+  html,body{background:#fff !important;color:#000}
+  body{padding:0 !important}
+  main,.wrap{padding:0 !important;max-width:none !important}
+  .rcpt{border:0;padding:0}
+  .rc-status{border:1px solid currentColor}
+  a{color:inherit;text-decoration:none}
+}

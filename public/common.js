@@ -84,11 +84,15 @@ var ICONS = {
 ICONS.eye = '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>';
 ICONS.whatsapp = '<path d="M4 20l1.3-3.9A8.2 8.2 0 1 1 8.2 19z"/><path d="M9 8.8c0 3 2.6 6 5.8 6.2l.9-1.4-1.6-.9-.8.8c-1-.4-2.4-1.8-2.8-2.8l.8-.8-.9-1.6-1.4.9"/>';
 ICONS.gear = '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M4.2 7.5l1.9 1.1M17.9 15.4l1.9 1.1M4.2 16.5l1.9-1.1M17.9 8.6l1.9-1.1"/>';
+ICONS.share = '<path d="M12 14.5v-11M8 7.5l4-4 4 4"/><path d="M8 10.5H6.5A1.5 1.5 0 0 0 5 12v7a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19v-7a1.5 1.5 0 0 0-1.5-1.5H16"/>';
+ICONS.camera = '<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.6-2.2h5.4L16.3 7h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.8" r="3.3"/>';
+ICONS.receipt = '<path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4z"/><path d="M9 8h6M9 11.5h6M9 15h3.5"/>';
 var LOGO = '<svg class="logo-mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><g class="lm-a"><circle cx="32" cy="24" r="10"/><rect x="24" y="40" width="16" height="46" rx="8"/><rect x="32" y="56" width="22" height="12" rx="6"/></g><g class="lm-b"><circle cx="68" cy="24" r="10"/><rect x="60" y="40" width="16" height="46" rx="8"/><rect x="48" y="56" width="20" height="12" rx="6"/></g></svg>';
 function brandHtml(href, label) { return '<a class="brand" href="' + href + '"' + (label ? ' aria-label="' + label + '"' : '') + '>' + LOGO + '<span>Padi<b>Hire</b></span></a>'; }
 function ic(n, cls) { return '<svg class="ic ' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (ICONS[n] || '') + '</svg>'; }
 var AVC = [['#d7ebf2', '#0e586f'], ['#f6e1d0', '#8a3c0b'], ['#e5ddf4', '#4a2e85'], ['#dcefd8', '#245a1b'], ['#f6dce3', '#8b2140'], ['#eee6cc', '#6a5106'], ['#dbe3f2', '#21417a'], ['#d9efe9', '#11594b']];
-function face(name, cls) {
+function face(name, cls, photo) {
+  if (photo) return '<img class="av av-img ' + (cls || '') + '" src="/api/files/' + (+photo) + '" alt="" loading="lazy" decoding="async">';
   var h = 0, s = String(name || '?');
   for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   var c = AVC[h % AVC.length];
