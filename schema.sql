@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT NOT NULL DEFAULT 'active',       -- active or suspended
   created_at INTEGER NOT NULL,
   cv_file INTEGER NOT NULL DEFAULT 0,
-  cv_name TEXT NOT NULL DEFAULT ''
+  cv_name TEXT NOT NULL DEFAULT '',
+  email_verified INTEGER NOT NULL DEFAULT 0,
+  email_alerts INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -210,6 +212,32 @@ CREATE TABLE IF NOT EXISTS flags (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS flags_status ON flags(status, id);
+
+CREATE TABLE IF NOT EXISTS tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tokens_user ON tokens(user_id, kind);
+
+CREATE TABLE IF NOT EXISTS limits (
+  k TEXT PRIMARY KEY,
+  n INTEGER NOT NULL DEFAULT 0,
+  reset_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS portfolio (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  file_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  link TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS portfolio_user ON portfolio(user_id, id);
 
 CREATE TABLE IF NOT EXISTS settings (
   k TEXT PRIMARY KEY,

@@ -53,6 +53,18 @@ schema.sql                  run once in the D1 console
 
 Each update ships with an `update-N.sql` file. Run it **once** in the D1 Console (same as `schema.sql`), then redeploy.
 - `update-2.sql`: CV and attachments, contact flags.
+- `update-3.sql`: email confirmation, password reset, email alerts, spam limits, portfolio.
+
+## Email and spam protection (optional settings)
+
+These switch on by adding variables in Cloudflare: Workers & Pages > workwork28 > Settings > Variables and Secrets (Production). Redeploy after adding them.
+
+- `RESEND_API_KEY` (secret): from resend.com > API Keys, after your domain is verified there.
+- `MAIL_FROM`: the sender, for example `PadiHire <hello@padihire.com>`. It must use the domain you verified in Resend.
+- `SITE_URL`: your live address, for example `https://padihire.com`. Used for links inside emails.
+- `TURNSTILE_SITEKEY` and `TURNSTILE_SECRET` (secret): from Cloudflare > Turnstile > Add widget, with your domain added.
+
+Without the Resend variables, the site works as before: no emails, and "Forgot password" sends people to WhatsApp support. Without the Turnstile variables, sign-up has no human check. Login and sign-up limits work either way.
 
 ## How the money works
 
