@@ -9,11 +9,11 @@ async function sharePage(ctx, meta) {
   let html = await res.text();
   const site = (env.SITE_URL || url.origin).replace(/\/+$/, '');
   if (meta) {
-    const title = meta.title + ' · PadiHire';
+    const title = meta.title + ' · Fere';
     const img = site + '/og.jpg';
     const tags = [
       '<meta property="og:type" content="website">',
-      '<meta property="og:site_name" content="PadiHire">',
+      '<meta property="og:site_name" content="Fere">',
       '<meta property="og:title" content="' + esc(meta.title) + '">',
       '<meta property="og:description" content="' + esc(meta.desc) + '">',
       '<meta property="og:url" content="' + esc(site + url.pathname) + '">',
@@ -43,7 +43,7 @@ export async function onRequestGet(ctx) {
         const bits = [u.title || 'Freelancer', u.city || 'Nigeria'];
         if (u.rating_count) bits.push((u.rating_sum / u.rating_count).toFixed(1) + '★ from ' + u.rating_count + (u.rating_count === 1 ? ' review' : ' reviews'));
         if (u.rate_from) bits.push('jobs from ' + naira(u.rate_from));
-        meta = { title: u.name + ' on PadiHire', desc: clip(bits.join(' · ') + '. ' + (u.about || ''), 200), route: 'freelancer/' + u.id };
+        meta = { title: u.name + ' on Fere', desc: clip(bits.join(' · ') + '. ' + (u.about || ''), 200), route: 'freelancer/' + u.id };
       }
     } catch (e) { console.error('share profile', e && e.message); }
   }
