@@ -39,7 +39,7 @@
     if (v.need === 'fre' && role() !== 'fre') return go(home());
     if (v.need === 'cli' && role() !== 'cli') return go(home());
     if (v.guest && U()) return go(home());
-    if (needsSetup() && name !== 'setup' && name !== 'terms' && name !== 'privacy') { if (S.view === 'setup' && $('#f-profile')) { toast('Finish your profile first.'); history.replaceState(null, '', '#/setup'); return; } return go('setup'); }
+    if (needsSetup() && ['setup', 'terms', 'privacy', 'verify', 'reset'].indexOf(name) < 0) { if (S.view === 'setup' && $('#f-profile')) { toast('Finish your profile first.'); history.replaceState(null, '', '#/setup'); return; } return go('setup'); }
     if (name === 'setup' && U() && !needsSetup()) return go('edit-profile');
     var y = window.scrollY, changed = S.view !== name || S.arg !== arg;
     S.view = name; S.arg = arg; S.qs = h.qs;
@@ -181,7 +181,33 @@
   var V = {};
 
   ICONS.lock = '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>';
+  ICONS.bell = '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>';
+  ICONS.mail = '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>';
   var CAT_IC = { design: 'pen', writing: 'doc', web: 'code', video: 'video', social: 'megaphone', admin: 'table' };
+  function verifyBanner() {
+    var u = U(); if (!u || !S.me.mail || u.email_verified) return '';
+    return '<div class="vbanner">' + ic('mail') + '<p><strong>Confirm your email.</strong> We sent a link to ' + esc(u.email) + '. It keeps your account safe and makes sure you get job alerts.</p><button type="button" class="btn btn-ghost btn-sm" data-act="verify-resend">Send again</button></div>';
+  }
+  function supportLine(text) { var wa = S.me.support_whatsapp; return wa ? '<p class="center-line small">' + (text || 'Can’t get in?') + ' <a class="link-btn" href="https://wa.me/' + esc(waNum(wa)) + '?text=' + encodeURIComponent('Hello PadiHire, I need help logging in. My email is: ') + '" target="_blank" rel="noopener">Message us on WhatsApp</a></p>' : ''; }
+  function portGrid(items, own) {
+    var s = (items || []).map(function (it) {
+      return '<figure class="port-it"><a class="port-img" href="/api/files/' + it.file_id + '" target="_blank" rel="noopener"><img src="/api/files/' + it.file_id + '" alt="' + esc(it.title) + '" loading="lazy"></a><figcaption><span>' + esc(it.title) + '</span>' +
+        (it.link ? '<a class="link-btn" href="' + esc(it.link) + '" target="_blank" rel="noopener nofollow">View project</a>' : '') + '</figcaption>' +
+        (own ? '<button type="button" class="port-del" data-act="port-del" data-id="' + it.id + '" aria-label="Remove ' + esc(it.title) + '">' + ic('close') + '</button>' : '') + '</figure>';
+    }).join('');
+    if (own && (items || []).length < 8) s += '<button type="button" class="port-add" data-act="port-add">' + ic('plus') + '<span>Add work</span></button>';
+    return s;
+  }
+  function mountTurnstile() {
+    var box = $('#jn-human'); if (!box || !S.me.turnstile) return;
+    S.tsToken = '';
+    function draw() {
+      var b = $('#jn-human'); if (!b || !window.turnstile) return;
+      try { S.tsWidget = window.turnstile.render(b, { sitekey: S.me.turnstile, theme: 'auto', callback: function (t) { S.tsToken = t; fieldErr('jn-human', ''); }, 'expired-callback': function () { S.tsToken = ''; }, 'error-callback': function () { S.tsToken = ''; } }); } catch (e) { console.error(e); }
+    }
+    if (window.turnstile) return draw();
+    if (!S.tsLoading) { S.tsLoading = true; var sc = document.createElement('script'); sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; sc.async = true; sc.onload = function () { S.tsLoading = false; draw(); }; document.head.appendChild(sc); }
+  }
   function greet() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
   function hello(sub, title, extra) { return '<div class="hello">' + face(U().name, 'av-md') + '<div class="hello-t"><p class="small">' + sub + '</p><h1 class="pg-title">' + title + '</h1></div>' + (extra || '') + '</div>'; }
   function stat(href, n, label) { return '<a class="stat" href="' + href + '"><b>' + n + '</b><span>' + label + '</span></a>'; }
@@ -335,6 +361,7 @@
         '<p class="fr-meta">' + (p.city ? '<span>' + ic('pin') + esc(p.city) + '</span>' : '') + stars(p.rating, p.reviews) + '<span>' + p.jobs_done + (p.jobs_done === 1 ? ' job done' : ' jobs done') + '</span></p></div></div>' +
         (act ? '<div class="pf-act">' + act + '</div>' : '') +
         '<section class="d-block"><h2 class="sub">About</h2><p class="d-desc">' + esc(p.about || 'No bio yet.') + '</p>' + (p.skills.length ? '<ul class="chips" style="margin-top:12px">' + p.skills.map(li).join('') + '</ul>' : '') + '</section>' +
+        ((d.portfolio || []).length ? '<section class="d-block"><h2 class="sub">Portfolio</h2><div class="port-grid">' + portGrid(d.portfolio, false) + '</div></section>' : '') +
         '<section class="d-block"><dl class="kv">' + kv('Category', esc(CAT[p.cat].label)) + (p.rate_from ? kv('Jobs from', naira(p.rate_from)) : '') + kv('Member since', new Date(p.since * 1000).getFullYear()) +
         (p.cv ? kv('CV', p.cv.locked ? '<a class="link-btn" href="#/login">Log in to view</a>' : '<a class="link-btn" href="/api/files/' + p.cv.id + '" target="_blank" rel="noopener">' + esc(p.cv.name) + '</a>') : '') + '</dl></section>' +
         '<section class="d-block"><h2 class="sub">Reviews</h2>' + (d.reviews.length ? '<ul class="reviews">' + d.reviews.map(function (r) {
@@ -346,19 +373,50 @@
   V.login = {
     guest: true, title: function () { return 'Log in'; },
     html: function () {
-      var wa = S.me.support_whatsapp;
+      var wa = S.me.support_whatsapp; S.forgotSent = '';
       return '<div class="wrap scr narrow"><h1 class="pg-title">Log in to PadiHire</h1><form id="f-login" class="form" novalidate>' +
         field('lg-login', 'Email or phone number', '<input id="lg-login" type="text" autocomplete="username" inputmode="email">') +
         field('lg-pass', 'Password', '<input id="lg-pass" type="password" autocomplete="current-password">') +
         '<button type="submit" class="btn btn-primary full">Log in</button></form>' +
         '<p class="center-line">Don’t have an account? <button type="button" class="link-btn" data-act="join">Sign up</button></p>' +
-        '<p class="center-line small">Forgot your password? ' + (wa ? '<a class="link-btn" href="https://wa.me/' + esc(waNum(wa)) + '?text=' + encodeURIComponent('Hello PadiHire, I forgot my password. My email is: ') + '" target="_blank" rel="noopener">Message us on WhatsApp</a>' : 'Contact PadiHire support.') + '</p></div>';
+        (S.me.mail ? '<p class="center-line small"><a class="link-btn" href="#/forgot">Forgot your password?</a></p>'
+          : '<p class="center-line small">Forgot your password? ' + (wa ? '<a class="link-btn" href="https://wa.me/' + esc(waNum(wa)) + '?text=' + encodeURIComponent('Hello PadiHire, I forgot my password. My email is: ') + '" target="_blank" rel="noopener">Message us on WhatsApp</a>' : 'Contact PadiHire support.') + '</p>') + '</div>';
+    }
+  };
+  V.forgot = {
+    guest: true, title: function () { return 'Reset your password'; },
+    html: function () {
+      if (S.forgotSent) return '<div class="wrap scr narrow"><h1 class="pg-title">Check your email</h1><p class="pg-sub">If an account matches <b>' + esc(S.forgotSent) + '</b>, we’ve emailed it a link to choose a new password. The link works for 1 hour. Check your spam folder too.</p><p class="center-line"><a class="link-btn" href="#/login">Back to log in</a></p>' + supportLine('Didn’t get it?') + '</div>';
+      return '<div class="wrap scr narrow">' + backBtn() + '<h1 class="pg-title">Forgot your password?</h1><p class="pg-sub">Enter the email or phone number on your account. We’ll email you a link to choose a new password.</p><form id="f-forgot" class="form" novalidate>' +
+        field('fg-login', 'Email or phone number', '<input id="fg-login" type="text" autocomplete="username" inputmode="email">') +
+        '<button type="submit" class="btn btn-primary full">Send reset link</button></form>' + supportLine() + '</div>';
+    }
+  };
+  V.reset = {
+    title: function () { return 'Choose a new password'; },
+    html: function (d, arg) {
+      return '<div class="wrap scr narrow"><h1 class="pg-title">Choose a new password</h1><p class="pg-sub">You’ll be logged in on this device, and logged out everywhere else.</p><form id="f-reset" class="form" novalidate data-token="' + esc(arg) + '">' +
+        field('rs-password', 'New password', '<input id="rs-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">') +
+        '<button type="submit" class="btn btn-primary full">Save and log in</button></form><p class="center-line small"><a class="link-btn" href="#/forgot">Ask for a new link</a></p></div>';
+    }
+  };
+  V.verify = {
+    title: function () { return 'Confirm your email'; },
+    load: function (t) {
+      return api('POST', 'auth/verify', { token: t }).then(function () { return (U() ? loadMe() : Promise.resolve()).then(function () { return { ok: true }; }); },
+        function (e) { return { ok: !!(U() && U().email_verified), msg: e.message }; });
+    },
+    html: function (d) {
+      var u = U();
+      return '<div class="wrap scr narrow"><h1 class="pg-title">' + (d.ok ? 'Email confirmed' : 'This link didn’t work') + '</h1><p class="pg-sub">' + (d.ok ? 'Thanks. Your email is confirmed, so you’ll get alerts about your jobs and payments.' : esc(d.msg)) + '</p>' +
+        '<p style="margin-top:18px"><a class="btn btn-primary" href="#/' + (u ? home() : 'login') + '">' + (u ? 'Continue' : 'Log in') + '</a></p>' +
+        (!d.ok && u ? '<p class="center-line small"><button type="button" class="link-btn" data-act="verify-resend">Send a new link</button></p>' : '') + '</div>';
     }
   };
   function waNum(n) { var s = String(n).replace(/\D/g, ''); return s.charAt(0) === '0' ? '234' + s.slice(1) : s; }
   function jopt(v, icon, title, body) { return '<button type="button" class="jopt" role="radio" aria-checked="' + (S.join.role === v) + '" data-act="pick-role" data-v="' + v + '">' + ic(icon) + '<span class="radio" aria-hidden="true"></span><strong>' + title + '</strong><span class="small">' + body + '</span></button>'; }
   V.join = {
-    guest: true, title: function () { return 'Sign up'; },
+    guest: true, title: function () { return 'Sign up'; }, after: function () { if (S.join.step !== 1) mountTurnstile(); },
     html: function () {
       var j = S.join;
       if (j.step === 1) {
@@ -377,7 +435,9 @@
         field('jn-phone', 'Phone number', '<input id="jn-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0803 123 4567">') +
         field('jn-email', 'Email', '<input id="jn-email" type="email" autocomplete="email" placeholder="you@example.com">') +
         field('jn-password', 'Password', '<input id="jn-password" type="password" autocomplete="new-password" placeholder="At least 8 characters">') +
+        '<label class="check"><input type="checkbox" id="jn-adult"><span>I am 18 or older</span></label><p class="err" id="jn-adult-err" hidden></p>' +
         '<label class="check"><input type="checkbox" id="jn-terms"><span>I agree to the <a class="link-btn" href="#/terms" target="_blank">terms</a> and <a class="link-btn" href="#/privacy" target="_blank">privacy policy</a>, and will keep all payments on PadiHire.</span></label><p class="err" id="jn-terms-err" hidden></p>' +
+        (S.me.turnstile ? '<div class="field"><div id="jn-human" class="ts-box"></div><p class="err" id="jn-human-err" hidden></p></div>' : '') +
         '<button type="submit" class="btn btn-primary full">Create my account</button></form></div>';
     }
   };
@@ -398,7 +458,7 @@
     },
     html: function (d) {
       var u = U(), w = S.me.wallet || {}, score = profileScore(u), sent = d.props.proposals.filter(function (x) { return x.status === 'sent'; }).length, act = S.me.active || 0;
-      return '<div class="wrap scr home">' + hello(greet(), esc(u.name), '<a class="icon-btn" href="#/freelancer/' + u.id + '" aria-label="View your public profile">' + ic('eye') + '</a>') +
+      return '<div class="wrap scr home">' + hello(greet(), esc(u.name), '<a class="icon-btn" href="#/freelancer/' + u.id + '" aria-label="View your public profile">' + ic('eye') + '</a>') + verifyBanner() +
         '<section class="wcard" aria-label="Wallet"><p class="wc-l">Available balance</p><p class="wc-n">' + naira(w.avail) + '</p>' +
         '<p class="wc-s">' + ic('lock') + (w.escrow_in ? naira(w.escrow_in) + ' held in escrow for you' : 'Client payments are held safely in escrow') + '</p>' +
         '<div class="wc-btns"><button type="button" class="btn wc-b1" data-act="withdraw">Withdraw</button><a class="btn wc-b2" href="#/wallet">History</a></div></section>' +
@@ -474,7 +534,7 @@
         else if (j.contract_id && (j.stage === 'active' || j.stage === 'delivered' || j.stage === 'disputed')) g.progress.push(j);
         else g.done.push(j);
       });
-      var s = '<div class="wrap scr home">' + hello(esc(u.business || 'Welcome back'), 'Hi, ' + esc(first(u.name)), '<a class="icon-btn" href="#/wallet" aria-label="Wallet history">' + ic('wallet') + '</a>') +
+      var s = '<div class="wrap scr home">' + hello(esc(u.business || 'Welcome back'), 'Hi, ' + esc(first(u.name)), '<a class="icon-btn" href="#/wallet" aria-label="Wallet history">' + ic('wallet') + '</a>') + verifyBanner() +
         '<section class="wcard light" aria-label="Wallet"><div class="wc-row"><div><p class="wc-l">Wallet</p><p class="wc-n">' + naira(d.wallet.avail) + '</p><p class="wc-s">' + (d.wallet.escrow_out ? ic('lock') + naira(d.wallet.escrow_out) + ' held in escrow' : 'Add money when you are ready to hire') + '</p></div><button type="button" class="btn btn-primary" data-act="topup">' + ic('plus') + 'Add money</button></div></section>' +
         '<section class="cta"><h2>Need something done?</h2><p>Post a job for free. Freelancers send you proposals, and you pay only when you hire.</p><a class="btn btn-primary" href="#/post">' + ic('plus') + 'Post a job</a></section>';
       d.jobs.filter(function (j) { return j.stage === 'delivered'; }).forEach(function (j) { s += '<div class="flag"><p><strong>' + esc(j.fre_name) + '</strong> delivered “' + esc(j.title) + '”. Review it to release ' + naira(j.amount) + '.</p><a class="btn btn-dark btn-sm" href="#/chat/' + j.thread_id + '">Review</a></div>'; });
@@ -667,6 +727,7 @@
         (cliR ? mitem('plus', 'Post a job', '', 'href="#/post"') : mitem('eye', 'View public profile', '', 'href="#/freelancer/' + u.id + '"') + mitem('heart', 'Saved jobs', '', 'href="#/work" data-saved="1"')) +
         mitem('bank', 'Bank account', u.bank.acct ? esc(u.bank.name) + ' •••• ' + esc(u.bank.acct.slice(-4)) : 'Not added yet', 'data-act="bank"') +
         mitem(cliR ? 'laptop' : 'briefcase', cliR ? 'Switch to freelancing' : 'Switch to hiring', cliR ? 'Find work with the same account' : 'Post jobs with the same account', 'data-act="switch" data-v="' + (cliR ? 'fre' : 'cli') + '"') +
+        (S.me.mail ? mitem('bell', 'Email alerts', u.email_alerts ? 'On for messages and proposals' : 'Off. Payment emails still come', 'data-act="alerts"') : '') +
         mitem('help', 'How payment works', '', 'data-act="help"') + mitem('doc', 'Terms and rules', '', 'href="#/terms"') + mitem('shield', 'Privacy policy', 'How we use and protect your data', 'href="#/privacy"') +
         (S.me.support_whatsapp ? mitem('whatsapp', 'Contact support', 'WhatsApp', 'href="https://wa.me/' + esc(waNum(S.me.support_whatsapp)) + '" target="_blank" rel="noopener"') : '') +
         (S.me.is_admin ? mitem('gear', 'Admin panel', 'Top-ups, withdrawals, disputes', 'href="/admin"') : '') +
@@ -689,6 +750,7 @@
           field('pf-rate', 'Jobs from (₦) <span class="opt">(optional)</span>', '<input id="pf-rate" type="text" inputmode="numeric" value="' + (u.rate_from ? num(u.rate_from) : '') + '" placeholder="15,000">', 'Your usual starting price')
           : field('pf-business', 'Business or brand name', '<input id="pf-business" type="text" value="' + esc(u.business) + '">', 'Optional')) +
         '<button type="submit" class="btn btn-primary full">' + (setup ? (fre ? 'Save and find work' : 'Save and continue') : 'Save profile') + '</button></form>' +
+        (fre && !setup ? '<h2 class="sub" style="margin-top:34px">Portfolio</h2><p class="small">Show up to 8 pictures of your best work. Clients see them on your profile.</p><div id="pf-port" class="port-grid">' + portGrid(S.port, true) + '</div>' : '') +
         (setup ? '<p class="center-line small">Not you? <button type="button" class="link-btn" data-act="signout">Log out</button></p>' :
         '<h2 class="sub" style="margin-top:34px">Change password</h2><form id="f-pass" class="form" novalidate>' +
         field('pw-current', 'Current password', '<input id="pw-current" type="password" autocomplete="current-password">') +
@@ -696,7 +758,7 @@
         '<button type="submit" class="btn btn-ghost full">Change password</button></form>') + '</div>';
   }
   function profileAfter() { var u = U(); var c = $('#pf-city'); if (c) c.value = u.city || ''; var k = $('#pf-cat'); if (k) k.value = u.cat || ''; }
-  V['edit-profile'] = { need: 'any', title: function () { return 'Edit profile'; }, html: function () { return profileHtml(false); }, after: profileAfter };
+  V['edit-profile'] = { need: 'any', title: function () { return 'Edit profile'; }, load: function () { return role() === 'fre' ? api('GET', 'me/portfolio').then(function (r) { S.port = r.items; }) : null; }, html: function () { return profileHtml(false); }, after: profileAfter };
   V.setup = { need: 'any', title: function () { return 'Set up your profile'; }, html: function () { return profileHtml(true); }, after: profileAfter };
   V.terms = {
     title: function () { return 'Terms and rules'; },
@@ -883,6 +945,24 @@
       case 'tog': var k = el.getAttribute('data-k'); S.q[k] = S.q[k] ? '' : '1'; el.setAttribute('aria-pressed', String(!!S.q[k])); reloadResults(); break;
       case 'clear': S.q = blankQ(); go('jobs'); break;
       case 'pcat': S.pcat = v; location.hash = '#/freelancers?cat=' + v + (S.pq ? '&q=' + encodeURIComponent(S.pq) : ''); break;
+      case 'verify-resend':
+        api('POST', 'me/verify').then(function (r) { if (r.already) { loadMe().then(function () { router(true); }); toast('Your email is already confirmed'); } else toast('Sent. Check your inbox and spam folder.'); }, function (er) { toast(er.message); });
+        break;
+      case 'alerts':
+        api('POST', 'me/alerts', { on: !U().email_alerts }).then(function (r) { return loadMe().then(function () { rerender(); toast(r.on ? 'Email alerts are on' : 'Email alerts are off. You’ll still get payment emails.'); }); }, function (er) { toast(er.message); });
+        break;
+      case 'port-add':
+        if (!S.me.uploads) { toast('Uploads aren’t switched on yet.'); break; }
+        S.portFile = null;
+        openModal(modalHead('Add work to your portfolio', 'A picture of something you made: a flyer, logo, screenshot of a website, or a still from a video.') + '<form id="f-port" novalidate>' +
+          '<div class="field"><span class="flabel">Picture</span><label class="port-pick" id="pt-pick"><input type="file" id="up-port" accept="image/png,image/jpeg,image/webp,image/gif">' + ic('plus') + '<span>Choose a picture (up to 5 MB)</span></label><p class="err" id="pt-file-err" hidden></p></div>' +
+          field('pt-title', 'Title', '<input id="pt-title" type="text" maxlength="60" placeholder="e.g. Menu flyer for a restaurant">') +
+          field('pt-link', 'Link (optional)', '<input id="pt-link" type="text" inputmode="url" autocapitalize="off" placeholder="https://www.behance.net/...">', 'Behance, Dribbble, Google Drive or your website') +
+          '<div class="modal-actions"><button type="submit" class="btn btn-primary full">Add to portfolio</button></div></form>');
+        break;
+      case 'port-del':
+        api('POST', 'me/portfolio/' + id + '/delete').then(function (r) { S.port = r.items; var g = $('#pf-port'); if (g) g.innerHTML = portGrid(S.port, true); toast('Removed from your portfolio'); }, function (er) { toast(er.message); });
+        break;
       case 'switch':
         api('POST', 'me/role', { role: v }).then(loadMe).then(function () {
           toast(v === 'cli' ? 'Switched to hiring' : 'Switched to freelancing');
@@ -969,11 +1049,25 @@
       if (!login) { fieldErr('lg-login', 'Enter your email or phone number.'); return; }
       run(api('POST', 'auth/login', { login: login, password: pw }), function () { loadMe().then(function () { var n = S.next; S.next = ''; if (n && n !== '#/login') location.hash = n; else go(home()); toast('Welcome back, ' + first(U().name)); }); }, '', 'lg-pass');
     } else if (id === 'f-join') {
-      if (!$('#jn-terms').checked) { fieldErr('jn-terms', 'Tick the box to agree to the terms.'); return; }
-      fieldErr('jn-terms', '');
+      var stop = false;
+      if (!$('#jn-adult').checked) { fieldErr('jn-adult', 'You must be 18 or older to use PadiHire.'); stop = true; } else fieldErr('jn-adult', '');
+      if (!$('#jn-terms').checked) { fieldErr('jn-terms', 'Tick the box to agree to the terms.'); stop = true; } else fieldErr('jn-terms', '');
+      if ($('#jn-human') && !S.tsToken) { fieldErr('jn-human', 'Complete the check to show you’re human.'); stop = true; }
+      if (stop) return;
       var fre = S.join.role === 'fre';
-      run(api('POST', 'auth/signup', { role: S.join.role, name: $('#jn-name').value, email: $('#jn-email').value, phone: $('#jn-phone').value, password: $('#jn-password').value, cat: fre ? $('#jn-cat').value : '', title: fre ? $('#jn-title').value : '', business: fre ? '' : $('#jn-business').value }),
-        function () { loadMe().then(function () { S.join = { step: 1, role: null }; var n = S.next; S.next = (n && n !== '#/login' && n !== '#/join') ? n : ''; go('setup'); toast('Welcome to PadiHire, ' + first(U().name)); }); }, 'jn-');
+      run(api('POST', 'auth/signup', { role: S.join.role, name: $('#jn-name').value, email: $('#jn-email').value, phone: $('#jn-phone').value, password: $('#jn-password').value, cat: fre ? $('#jn-cat').value : '', title: fre ? $('#jn-title').value : '', business: fre ? '' : $('#jn-business').value, adult: true, cf_token: S.tsToken || '' }),
+        function () { loadMe().then(function () { S.join = { step: 1, role: null }; var n = S.next; S.next = (n && n !== '#/login' && n !== '#/join') ? n : ''; go('setup'); toast('Welcome to PadiHire, ' + first(U().name)); }); }, 'jn-')
+        .then(function () { if (!U() && window.turnstile && S.tsWidget != null && $('#jn-human')) { try { window.turnstile.reset(S.tsWidget); } catch (e) { /* ignore */ } S.tsToken = ''; } });
+    } else if (id === 'f-forgot') {
+      var fl = $('#fg-login').value.trim();
+      if (!fl) { fieldErr('fg-login', 'Enter your email or phone number.'); return; }
+      run(api('POST', 'auth/forgot', { login: fl }), function () { S.forgotSent = fl; rerender(); }, 'fg-', 'fg-login');
+    } else if (id === 'f-reset') {
+      run(api('POST', 'auth/reset', { token: f.getAttribute('data-token'), password: $('#rs-password').value }), function () { loadMe().then(function () { go(home()); toast('Password changed. You’re logged in.'); }); }, 'rs-', 'rs-password');
+    } else if (id === 'f-port') {
+      if (S.portFile && S.portFile.busy) { toast('Wait for the picture to finish uploading.'); return; }
+      if (!S.portFile) { fieldErr('pt-file', 'Add a picture of your work.'); return; }
+      run(api('POST', 'me/portfolio', { file_id: S.portFile.id, title: $('#pt-title').value, link: $('#pt-link').value.trim() }), function (r) { S.port = r.items; S.portFile = null; closeModal(); var g = $('#pf-port'); if (g) g.innerHTML = portGrid(S.port, true); toast('Added to your portfolio'); }, 'pt-');
     } else if (id === 'f-apply') {
       if (S.att.apply.some(function (x) { return x.busy; })) { toast('Wait for your files to finish uploading.'); return; }
       run(api('POST', 'jobs/' + f.getAttribute('data-id') + '/apply', { price: parseNum($('#ap-price').value), days: parseNum($('#ap-days').value), note: $('#ap-note').value, files: S.att.apply.map(function (x) { return x.id; }) }), function (r) {
@@ -1042,6 +1136,17 @@
   document.addEventListener('change', function (e) {
     var el = e.target;
     if (el.matches && el.matches('input[type=file][data-up]')) { handleFiles(el); return; }
+    if (el.id === 'up-port' && el.files && el.files[0]) {
+      var file = el.files[0], pick = $('#pt-pick');
+      if (file.size > 5 * 1048576) { fieldErr('pt-file', 'That picture is too big. The limit is 5 MB.'); return; }
+      fieldErr('pt-file', ''); S.portFile = { busy: true };
+      if (pick) pick.innerHTML = '<span>Uploading ' + esc(file.name) + '…</span>';
+      upload(file, 'portfolio').then(function (r) {
+        S.portFile = r; var pk = $('#pt-pick');
+        if (pk) pk.outerHTML = '<div class="port-chosen"><img src="/api/files/' + r.id + '" alt=""><span>' + esc(r.name) + '</span><button type="button" class="link-btn" data-act="port-add">Change</button></div>';
+      }, function (er) { S.portFile = null; var pk = $('#pt-pick'); if (pk) pk.innerHTML = '<input type="file" id="up-port" accept="image/png,image/jpeg,image/webp,image/gif">' + ic('plus') + '<span>Choose a picture (up to 5 MB)</span>'; fieldErr('pt-file', er.message); });
+      return;
+    }
     if (el.id === 'pf-cat' && S.picks.pf) { S.picks.pf.cat = el.value; spRefresh('pf'); }
     if (el.id === 'pj-cat' && S.picks.pj) { S.picks.pj.cat = el.value; spRefresh('pj'); }
     if (el.hasAttribute && el.hasAttribute('data-q')) { S.q[el.getAttribute('data-q')] = el.value; reloadResults(); }

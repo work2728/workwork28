@@ -611,3 +611,25 @@ body.hero-top .top .btn-primary{background:#fff;color:#5b21b6}
   .tabs a.fab[aria-current="page"]::before{display:none}
 }
 .fab-c .ic{width:22px;height:22px}
+/* email confirm banner, portfolio, human check */
+.vbanner{display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap;margin-top:14px;padding:12px 14px;border-radius:14px;background:var(--flag);border:1px solid var(--flag-line)}
+.vbanner>.ic{width:20px;height:20px;color:var(--accent-ink)}
+.vbanner p{flex:1 1 220px;font-size:14px;line-height:1.45}
+.ts-box{min-height:66px}
+.port-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:12px}
+.port-it{position:relative;margin:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--card);min-width:0}
+.port-img{display:block}
+.port-it img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:var(--chip)}
+.port-it figcaption{padding:8px 10px 10px;display:grid;gap:2px;font-size:13.5px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.port-it figcaption .link-btn{font-size:13px;font-weight:600;justify-self:start}
+.port-del{position:absolute;top:6px;right:6px;width:36px;height:36px;border-radius:50%;background:rgba(26,22,37,.72);color:#fff;display:grid;place-items:center}
+.port-del .ic{width:16px;height:16px}
+.port-add{min-height:150px;border:1.5px dashed var(--line-2);border-radius:14px;display:grid;place-items:center;align-content:center;gap:6px;color:var(--accent-ink);font-weight:700;font-size:14px;background:var(--card)}
+.port-add .ic{width:22px;height:22px}
+.port-add:hover{border-color:var(--accent)}
+.port-pick{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;min-height:96px;padding:12px;border:1.5px dashed var(--line-2);border-radius:12px;color:var(--accent-ink);font-weight:600;font-size:14px;cursor:pointer;text-align:center}
+.port-pick:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.port-pick input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.port-chosen{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px;border:1px solid var(--line);border-radius:12px}
+.port-chosen img{width:72px;height:54px;object-fit:cover;border-radius:8px;background:var(--chip)}
+.port-chosen span{flex:1 1 120px;min-width:0;font-size:13.5px;overflow-wrap:anywhere}
