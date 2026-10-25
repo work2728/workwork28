@@ -9,11 +9,11 @@ async function sharePage(ctx, meta) {
   let html = await res.text();
   const site = (env.SITE_URL || url.origin).replace(/\/+$/, '');
   if (meta) {
-    const title = meta.title + ' · PadiHire';
+    const title = meta.title + ' · Fere';
     const img = site + '/og.jpg';
     const tags = [
       '<meta property="og:type" content="website">',
-      '<meta property="og:site_name" content="PadiHire">',
+      '<meta property="og:site_name" content="Fere">',
       '<meta property="og:title" content="' + esc(meta.title) + '">',
       '<meta property="og:description" content="' + esc(meta.desc) + '">',
       '<meta property="og:url" content="' + esc(site + url.pathname) + '">',
