@@ -872,6 +872,12 @@ body::before{background:var(--card)}
 .fchip:hover{border-color:var(--accent)}
 .fchip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--card)}
 
-/* confirm-email banner under the top bar */
+/* confirm-email strip under the top bar */
 #vtop:empty{display:none}
-#vtop .vbanner{margin-top:12px}
+.vstrip{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:36px;padding:6px 16px;background:var(--flag);border-bottom:1px solid var(--flag-line);font-size:13px;line-height:1.3;color:var(--ink);cursor:pointer}
+.vstrip .ic{width:16px;height:16px;flex:none;color:var(--accent-ink)}
+.vstrip span{min-width:0;text-align:left;overflow-wrap:anywhere}
+.vstrip{padding:8px 16px}
+.vstrip strong{font-weight:700}
+.vstrip b{flex:none;font-weight:700;color:var(--accent-ink);text-decoration:underline;text-underline-offset:2px}
+.vstrip:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}

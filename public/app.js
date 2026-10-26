@@ -229,7 +229,7 @@
   var CAT_IC = { design: 'pen', writing: 'doc', web: 'code', video: 'video', social: 'megaphone', admin: 'table' };
   function verifyBanner() {
     var u = U(); if (!u || !S.me.mail || u.email_verified) return '';
-    return '<div class="vbanner">' + ic('mail') + '<p><strong>Confirm your email.</strong> We sent a link to ' + esc(u.email) + '. You can look around, but you need to confirm it before you can save your profile, post jobs, apply or move money.</p><button type="button" class="btn btn-ghost btn-sm" data-act="verify-resend">Send again</button></div>';
+    return '<div class="vbanner vb-slim">' + ic('mail') + '<p><strong>Confirm your email</strong> to post, apply and move money.</p><button type="button" class="vb-btn" data-act="verify-resend">Resend</button></div>';
   }
   function modalVerify() {
     var u = U();
@@ -1108,7 +1108,7 @@
       '<nav class="nav" aria-label="Main">' + navItems.map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
       '<div class="top-right">' + right + '</div></div>';
     document.body.classList.toggle('guest', !u);
-    var vt = $('#vtop'); if (vt) vt.innerHTML = needsVerify() && S.view !== 'verify' ? '<div class="wrap">' + verifyBanner() + '</div>' : '';
+    var vt = $('#vtop'); if (vt) vt.innerHTML = needsVerify() && S.view !== 'verify' ? '<button type="button" class="vstrip" data-act="verify-resend" aria-label="We sent a confirmation link to ' + esc(U().email) + '. Confirm it to unlock Fere. Tap to resend the link.">' + ic('mail') + '<span>We sent a confirmation link to <strong>' + esc(U().email) + '</strong>. Confirm it to unlock Fere.</span><b>Resend</b></button>' : '';
     footer();
     document.body.classList.toggle('hero-top', S.view === 'explore' && !u);
     var tabs = $('#tabs'); tabs.style.setProperty('--n', items.length);
