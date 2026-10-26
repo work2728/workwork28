@@ -17,6 +17,7 @@
     if (u.role === 'fre') return !(u.title && u.cat && u.skills && u.skills.length && u.about && u.about.length >= 30);
     return false;
   }
+  function needsVerify() { var u = U(); return !!(u && S.me.mail && !u.email_verified); }
   function home() { return !U() ? 'explore' : role() === 'cli' ? 'dash' : 'home'; }
   function locText(j) { return j.remote ? 'Remote' : (j.city || 'Nigeria'); }
   function feePct() { return (S.me.fee || {}); }
@@ -228,8 +229,14 @@
   var CAT_IC = { design: 'pen', writing: 'doc', web: 'code', video: 'video', social: 'megaphone', admin: 'table' };
   function verifyBanner() {
     var u = U(); if (!u || !S.me.mail || u.email_verified) return '';
-    return '<div class="vbanner">' + ic('mail') + '<p><strong>Confirm your email.</strong> We sent a link to ' + esc(u.email) + '. It keeps your account safe and makes sure you get job alerts.</p><button type="button" class="btn btn-ghost btn-sm" data-act="verify-resend">Send again</button></div>';
+    return '<div class="vbanner">' + ic('mail') + '<p><strong>Confirm your email.</strong> We sent a link to ' + esc(u.email) + '. You can look around, but you need to confirm it before you can save your profile, post jobs, apply or move money.</p><button type="button" class="btn btn-ghost btn-sm" data-act="verify-resend">Send again</button></div>';
   }
+  function modalVerify() {
+    var u = U();
+    openModal(modalHead('Confirm your email first', 'We sent a link to <strong>' + esc(u ? u.email : 'your email') + '</strong>. Open it, then come back and try again. Anything you filled in stays here.') +
+      '<p class="small" style="margin-top:4px">Can’t find it? Check your spam or promotions folder.</p><div class="done-btns"><button type="button" class="btn btn-primary" data-act="verify-resend">Send the link again</button><button type="button" class="btn btn-ghost" data-act="close">OK</button></div>');
+  }
+  window.FERE_VERIFY = function () { loadMe(); modalVerify(); };
   function supportLine(text) { var wa = S.me.support_whatsapp; return wa ? '<p class="center-line small">' + (text || 'Can’t get in?') + ' <a class="link-btn" href="https://wa.me/' + esc(waNum(wa)) + '?text=' + encodeURIComponent('Hello Fere, I need help logging in. My email is: ') + '" target="_blank" rel="noopener">Message us on WhatsApp</a></p>' : ''; }
   function portGrid(items, own) {
     var s = (items || []).map(function (it) {
@@ -451,7 +458,7 @@
     },
     html: function (d) {
       var u = U();
-      return '<div class="wrap scr narrow"><h1 class="pg-title">' + (d.ok ? 'Email confirmed' : 'This link didn’t work') + '</h1><p class="pg-sub">' + (d.ok ? 'Thanks. Your email is confirmed, so you’ll get alerts about your jobs and payments.' : esc(d.msg)) + '</p>' +
+      return '<div class="wrap scr narrow"><h1 class="pg-title">' + (d.ok ? 'Email confirmed' : 'This link didn’t work') + '</h1><p class="pg-sub">' + (d.ok ? 'Thanks. Your email is confirmed. You can carry on.' : esc(d.msg)) + '</p>' +
         '<p style="margin-top:18px"><a class="btn btn-primary" href="#/' + (u ? home() : 'login') + '">' + (u ? 'Continue' : 'Log in') + '</a></p>' +
         (!d.ok && u ? '<p class="center-line small"><button type="button" class="link-btn" data-act="verify-resend">Send a new link</button></p>' : '') + '</div>';
     }
@@ -498,7 +505,7 @@
     },
     html: function (d) {
       var u = U(), w = S.me.wallet || {}, score = profileScore(u), sent = d.props.proposals.filter(function (x) { return x.status === 'sent'; }).length, act = S.me.active || 0;
-      return '<div class="wrap scr home">' + hello(greet(), esc(u.name), '<a class="icon-btn" href="#/freelancer/' + u.id + '" aria-label="View your public profile">' + ic('eye') + '</a>') + verifyBanner() +
+      return '<div class="wrap scr home">' + hello(greet(), esc(u.name), '<a class="icon-btn" href="#/freelancer/' + u.id + '" aria-label="View your public profile">' + ic('eye') + '</a>') +
         '<section class="wcard" aria-label="Wallet"><p class="wc-l">Available balance</p><p class="wc-n">' + naira(w.avail) + '</p>' +
         '<p class="wc-s">' + ic('lock') + (w.escrow_in ? naira(w.escrow_in) + ' held in escrow for you' : 'Client payments are held safely in escrow') + '</p>' +
         '<div class="wc-btns"><button type="button" class="btn wc-b1" data-act="withdraw">Withdraw</button><a class="btn wc-b2" href="#/wallet">History</a></div></section>' +
@@ -575,7 +582,7 @@
         else if (j.contract_id && (j.stage === 'active' || j.stage === 'delivered' || j.stage === 'disputed')) g.progress.push(j);
         else g.done.push(j);
       });
-      var s = '<div class="wrap scr home">' + hello(esc(u.business || 'Welcome back'), 'Hi, ' + esc(first(u.name)), '<a class="icon-btn" href="#/wallet" aria-label="Wallet history">' + ic('wallet') + '</a>') + verifyBanner() +
+      var s = '<div class="wrap scr home">' + hello(esc(u.business || 'Welcome back'), 'Hi, ' + esc(first(u.name)), '<a class="icon-btn" href="#/wallet" aria-label="Wallet history">' + ic('wallet') + '</a>') +
         '<section class="wcard" aria-label="Wallet"><div class="wc-row"><div><p class="wc-l">Wallet balance</p><p class="wc-n">' + naira(d.wallet.avail) + '</p><p class="wc-s">' + (d.wallet.escrow_out ? ic('lock') + naira(d.wallet.escrow_out) + ' held in escrow' : 'Add money when you are ready to hire') + '</p></div><button type="button" class="btn wc-b1" data-act="topup">' + ic('plus') + 'Add money</button></div></section>' +
         qtiles([['#/post', 'Post a job', 'plus', 'violet'], ['#/freelancers', 'Find talent', 'users', 'teal'], ['#/wallet', 'Wallet', 'wallet', 'amber'], ['#/help', 'Help', 'help', 'rose']]);
       d.jobs.filter(function (j) { return j.stage === 'delivered'; }).forEach(function (j) { s += '<div class="flag"><p><strong>' + esc(j.fre_name) + '</strong> delivered “' + esc(j.title) + '”. Review it to release ' + naira(j.amount) + '.</p><a class="btn btn-dark btn-sm" href="#/chat/' + j.thread_id + '">Review</a></div>'; });
@@ -1101,6 +1108,7 @@
       '<nav class="nav" aria-label="Main">' + navItems.map(function (it) { return '<a href="#/' + it[0] + '"' + (it[0] === key ? ' aria-current="page"' : '') + '>' + it[1] + badge(it[0]) + '</a>'; }).join('') + '</nav>' +
       '<div class="top-right">' + right + '</div></div>';
     document.body.classList.toggle('guest', !u);
+    var vt = $('#vtop'); if (vt) vt.innerHTML = needsVerify() && S.view !== 'verify' ? '<div class="wrap">' + verifyBanner() + '</div>' : '';
     footer();
     document.body.classList.toggle('hero-top', S.view === 'explore' && !u);
     var tabs = $('#tabs'); tabs.style.setProperty('--n', items.length);
@@ -1227,6 +1235,7 @@
       case 'apply':
         if (!U()) { gate('fre', 'Sign up to apply', 'Create a free freelancer account to send proposals and get paid through escrow.'); break; }
         if (!U().cat) { toast('Set up your freelancer profile first.'); go('edit-profile'); break; }
+        if (needsVerify()) { modalVerify(); break; }
         modalApply(S.data.job); break;
       case 'report': if (!U()) { gate('fre', 'Log in to report', 'You need an account to report a job.'); break; } modalReport(S.data.job); break;
       case 'tog': var k = el.getAttribute('data-k'); S.q[k] = S.q[k] ? '' : '1'; el.setAttribute('aria-pressed', String(!!S.q[k])); reloadResults(); break;
@@ -1285,11 +1294,11 @@
       case 'close-job':
         if (!confirmStep(el, 'Tap again to close this job')) break;
         api('POST', 'myjobs/' + id + '/close').then(function () { toast('Job closed'); router(true); }, function (er) { toast(er.message); }); break;
-      case 'topup': modalTopup(+(el.getAttribute('data-need') || 0)); break;
+      case 'topup': if (needsVerify()) { modalVerify(); break; } modalTopup(+(el.getAttribute('data-need') || 0)); break;
       case 'show-bank': api('GET', 'wallet').then(function (d) { modalTransfer({ amount: +el.getAttribute('data-amt'), ref: el.getAttribute('data-ref'), bank: d.company_bank }); }); break;
       case 'sent': closeModal(); if (S.view === 'wallet') router(true); else go('wallet'); toast('Thanks. We’ll add it to your wallet once we see it.'); break;
-      case 'withdraw': modalWithdraw(); break;
-      case 'bank': modalBank(); break;
+      case 'withdraw': if (needsVerify()) { modalVerify(); break; } modalWithdraw(); break;
+      case 'bank': if (needsVerify()) { modalVerify(); break; } modalBank(); break;
       case 'copy':
         var text = el.getAttribute('data-copy');
         try { navigator.clipboard.writeText(text).then(function () { el.innerHTML = ic('tick') + 'Copied'; }, function () { toast(text); }); } catch (er) { toast(text); }

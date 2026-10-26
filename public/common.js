@@ -113,7 +113,7 @@ function api(method, path, body) {
       e0.status = 503; e0.data = {}; e0.setup = true; throw e0;
     }
     return r.json().catch(function () { return {}; }).then(function (d) {
-      if (!r.ok) { var e = new Error(d.error || 'Something went wrong. Please try again.'); e.status = r.status; e.data = d; throw e; }
+      if (!r.ok) { var e = new Error(d.error || 'Something went wrong. Please try again.'); e.status = r.status; e.data = d; if (r.status === 403 && d.verify && typeof window.FERE_VERIFY === 'function') window.FERE_VERIFY(d); throw e; }
       return d;
     });
   }, function () { var e = new Error('No internet connection. Check your network and try again.'); e.status = 0; e.data = {}; throw e; });
@@ -150,6 +150,7 @@ function field(id, label, input, hint) { return '<div class="field"><label for="
 function fieldErr(id, msg) { var e = document.getElementById(id + '-err'), i = document.getElementById(id); if (e) { e.textContent = msg || ''; e.hidden = !msg; } if (i) i.setAttribute('aria-invalid', msg ? 'true' : 'false'); return !msg; }
 function clearErrs(form) { $$('.err', form).forEach(function (e) { e.hidden = true; e.textContent = ''; }); $$('[aria-invalid]', form).forEach(function (i) { i.setAttribute('aria-invalid', 'false'); }); }
 function showErrs(prefix, err, form, fallbackId) {
+  if (err && err.data && err.data.verify) return;
   var fields = (err.data && err.data.fields) || {}, any = false;
   Object.keys(fields).forEach(function (k) { if (document.getElementById(prefix + k)) { fieldErr(prefix + k, fields[k]); any = true; } });
   if (!any) { if (fallbackId && document.getElementById(fallbackId + '-err')) fieldErr(fallbackId, err.message); else toast(err.message); }

@@ -871,3 +871,7 @@ body::before{background:var(--card)}
 .fchip{min-height:40px;padding:0 16px;border-radius:999px;border:1px solid var(--line-2);background:var(--card);font-size:13.5px;font-weight:600;color:var(--ink-2)}
 .fchip:hover{border-color:var(--accent)}
 .fchip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--card)}
+
+/* confirm-email banner under the top bar */
+#vtop:empty{display:none}
+#vtop .vbanner{margin-top:12px}
