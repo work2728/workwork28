@@ -74,6 +74,11 @@ export async function onRequest(ctx) {
     }
     const c = { req: request, env, db: env.DB, url, q: url.searchParams, body, user: null, set: null, cookies: [], wait: typeof ctx.waitUntil === 'function' ? ctx.waitUntil.bind(ctx) : null };
     c.user = await currentUser(c);
+    // Once email sending is on, an unconfirmed account can browse, fill forms, upload files and read a CV,
+    // but can't save, post, apply, message or move money until the email is confirmed.
+    if (method === 'POST' && c.user && !c.user.email_verified && mailOn(c) && !/^(?:auth\/.*|me\/verify|me\/role|me\/alerts|me\/cv\/read|files|saved\/\d+)$/.test(parts.join('/'))) {
+      fail(403, 'Confirm your email first. Open the link we sent to ' + c.user.email + '.', { verify: true });
+    }
     await autoRelease(c);
     for (const [m, pat, h] of ROUTES) {
       if (m !== method) continue;
